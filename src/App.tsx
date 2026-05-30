@@ -405,6 +405,14 @@ function App() {
               selectedProject={selectedProject} 
               onAnalysisComplete={handleAnalysisComplete}
               session={session}
+              projects={projects}
+              onProjectCreated={(newProj) => {
+                setProjects(prev => [newProj, ...prev]);
+                setSelectedProject(newProj);
+              }}
+              onProjectSelected={(proj) => {
+                setSelectedProject(proj);
+              }}
             />
           </div>
         )}

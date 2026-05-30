@@ -1,7 +1,7 @@
 ---
 name: code-reviewer-agent
 description: Proactively inspects multi-language source code (C, C++, C#, Python, Go, Java, TS/JS) for logic bugs, performance issues, and security vulnerabilities, returning structured issues.
-model: gemini-2.5-flash
+model: gemini-3.5-flash
 temperature: 0.2
 max_output_tokens: 8192
 tools: []

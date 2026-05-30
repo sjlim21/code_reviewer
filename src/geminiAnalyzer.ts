@@ -41,8 +41,8 @@ export const analyzeCodeWithGemini = async (
 
   // Google OAuth Access Token이 있다면 Bearer 헤더를 사용하고, 없다면 전역 API Key 파라미터를 사용합니다.
   const url = providerToken
-    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
-    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
+    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
