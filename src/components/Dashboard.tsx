@@ -268,7 +268,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" id="trend-chart-container">
               <AreaChart data={chartTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="glowIndigo" x1="0" y1="0" x2="0" y2="1">
@@ -298,7 +298,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           
           <div className="h-64 flex items-center justify-center">
             {chartCategoryData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" id="category-chart-container">
                 <BarChart data={chartCategoryData} layout="vertical" margin={{ top: 0, right: 10, left: -10, bottom: 0 }}>
                   <XAxis type="number" stroke="#475569" fontSize={10} hide />
                   <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={11} width={80} tickLine={false} axisLine={false} />

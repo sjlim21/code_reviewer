@@ -7,7 +7,11 @@ export const STORAGE_KEYS = {
   GEMINI_API_KEY: 'code_eye_gemini_api_key'
 };
 
-// 동적으로 Supabase 클라이언트를 가져오는 함수
+let cachedSupabaseClient: SupabaseClient | null = null;
+let cachedUrl = '';
+let cachedKey = '';
+
+// 동적으로 Supabase 클라이언트를 가져오는 함수 (싱글톤 보장)
 export const getSupabaseClient = (): SupabaseClient | null => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -19,8 +23,16 @@ export const getSupabaseClient = (): SupabaseClient | null => {
   const key = envKey || localKey || '';
 
   if (url && key) {
+    // 기존 캐시된 클라이언트가 있고 접속 주소/키가 동일하다면 싱글톤 재사용
+    if (cachedSupabaseClient && cachedUrl === url && cachedKey === key) {
+      return cachedSupabaseClient;
+    }
+    
     try {
-      return createClient(url, key);
+      cachedSupabaseClient = createClient(url, key);
+      cachedUrl = url;
+      cachedKey = key;
+      return cachedSupabaseClient;
     } catch (e) {
       console.error("Supabase client initialization failed:", e);
       return null;
