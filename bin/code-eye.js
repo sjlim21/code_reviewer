@@ -595,8 +595,7 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
 
     if (googleToken) {
       const gcpProjectId = await ensureGcpCredentials(customGcpProjectId);
-      // Vertex AI API Endpoint로 마이그레이션 (cloud-platform scope 활용)
-      url = `https://us-central1-aiplatform.googleapis.com/v1/projects/${gcpProjectId}/locations/us-central1/publishers/google/models/gemini-1.5-flash:generateContent`;
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
       headers['Authorization'] = `Bearer ${googleToken}`;
       headers['x-goog-user-project'] = gcpProjectId;
     } else {

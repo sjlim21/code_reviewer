@@ -41,14 +41,13 @@ export const analyzeCodeWithGemini = async (
   };
 
   if (providerToken) {
-    const gcpProjectId = import.meta.env.VITE_GCP_PROJECT_ID || '';
-    if (!gcpProjectId) {
-      throw new Error("Vertex AI를 구동하기 위한 구글 클라우드 프로젝트 ID(VITE_GCP_PROJECT_ID) 환경변수가 부재합니다.");
-    }
-    // Vertex AI API Endpoint로 마이그레이션 (cloud-platform scope 활용)
-    url = `https://us-central1-aiplatform.googleapis.com/v1/projects/${gcpProjectId}/locations/us-central1/publishers/google/models/gemini-1.5-flash:generateContent`;
+    // Google OAuth Access Token을 베어러 토큰으로 헤더에 탑재
+    url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
     headers['Authorization'] = `Bearer ${providerToken}`;
-    headers['x-goog-user-project'] = gcpProjectId;
+    const gcpProjectId = import.meta.env.VITE_GCP_PROJECT_ID || '';
+    if (gcpProjectId) {
+      headers['x-goog-user-project'] = gcpProjectId;
+    }
   } else {
     if (!apiKey) {
       throw new Error("분석을 실행하기 위한 구글 인증 세션(OAuth) 또는 시스템 API Key(VITE_GEMINI_API_KEY)가 부재합니다.");
