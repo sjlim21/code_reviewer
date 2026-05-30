@@ -278,7 +278,7 @@ const handleLogin = async () => {
 
   server.listen(port, () => {
     // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/cloud-platform&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
     console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
@@ -595,7 +595,8 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
 
     if (googleToken) {
       const gcpProjectId = await ensureGcpCredentials(customGcpProjectId);
-      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
+      // Vertex AI API Endpoint로 마이그레이션 (cloud-platform scope 활용)
+      url = `https://us-central1-aiplatform.googleapis.com/v1/projects/${gcpProjectId}/locations/us-central1/publishers/google/models/gemini-1.5-flash:generateContent`;
       headers['Authorization'] = `Bearer ${googleToken}`;
       headers['x-goog-user-project'] = gcpProjectId;
     } else {
