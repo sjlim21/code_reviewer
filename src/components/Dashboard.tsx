@@ -14,7 +14,8 @@ import {
   Search,
   Code,
   Flame,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -34,6 +35,7 @@ interface DashboardProps {
   onSelectIssue: (issue: Issue) => void;
   issues: Issue[];
   projects: Project[];
+  onDeleteProject: (projectId: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -41,7 +43,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSelectProject,
   onSelectIssue,
   issues,
-  projects
+  projects,
+  onDeleteProject
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -130,28 +133,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
               프로젝트 목록
             </h2>
             
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
               {projects.map(proj => {
                 const isActive = selectedProject?.id === proj.id;
                 return (
-                  <button
-                    key={proj.id}
-                    onClick={() => onSelectProject(proj)}
-                    className={`w-full text-left p-3.5 rounded-xl flex items-center justify-between transition-all duration-300 ${
-                      isActive 
-                        ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/10 border border-indigo-500/40 text-indigo-100 shadow-[0_0_15px_0_rgba(99,102,241,0.15)]' 
-                        : 'border border-slate-800/60 bg-slate-900/20 hover:border-slate-700/60 hover:bg-slate-800/30 text-slate-400'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-semibold text-sm text-slate-100">{proj.name}</div>
-                      <div className="text-[10px] font-mono text-slate-500 mt-1 flex items-center justify-between w-full">
-                        <span className="uppercase tracking-wider">{proj.language}</span>
-                        <span className="text-slate-700 font-sans lowercase truncate max-w-[90px] ml-2">id: {proj.id}</span>
+                  <div key={proj.id} className="group relative">
+                    <button
+                      onClick={() => onSelectProject(proj)}
+                      className={`w-full text-left p-3.5 pr-10 rounded-xl flex items-center justify-between transition-all duration-300 ${
+                        isActive 
+                          ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/10 border border-indigo-500/40 text-indigo-100 shadow-[0_0_15px_0_rgba(99,102,241,0.15)]' 
+                          : 'border border-slate-800/60 bg-slate-900/20 hover:border-slate-700/60 hover:bg-slate-800/30 text-slate-400'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-semibold text-sm text-slate-100">{proj.name}</div>
+                        <div className="text-[10px] font-mono text-slate-500 mt-1 flex items-center justify-between w-full">
+                          <span className="uppercase tracking-wider">{proj.language}</span>
+                          <span className="text-slate-700 font-sans lowercase truncate max-w-[90px] ml-2">id: {proj.id}</span>
+                        </div>
                       </div>
-                    </div>
-                    <ChevronRight size={14} className={isActive ? 'text-indigo-400' : 'text-slate-600'} />
-                  </button>
+                      <ChevronRight size={14} className={isActive ? 'text-indigo-400' : 'text-slate-600'} />
+                    </button>
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProject(proj.id);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-200"
+                      title="프로젝트 삭제"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 );
               })}
             </div>

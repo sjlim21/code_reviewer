@@ -283,6 +283,43 @@ function App() {
     setActiveTab('dashboard');
   };
 
+  // 7. 프로젝트 삭제 핸들러
+  const handleDeleteProject = async (projectId: string) => {
+    if (!window.confirm('정말로 이 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며, 프로젝트와 연결된 모든 이슈 및 분석 이력이 영구적으로 제거됩니다.')) {
+      return;
+    }
+
+    if (isUsingRealDB) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('projects')
+            .delete()
+            .eq('id', projectId);
+          if (error) throw error;
+        } catch (e) {
+          console.error("DB project delete failed:", e);
+          alert('프로젝트 삭제 중 에러가 발생했습니다: ' + (e as any).message);
+          return;
+        }
+      }
+    }
+
+    // 로컬 상태 동기화
+    const updatedProjects = projects.filter(p => p.id !== projectId);
+    setProjects(updatedProjects);
+
+    if (selectedProject?.id === projectId) {
+      if (updatedProjects.length > 0) {
+        setSelectedProject(updatedProjects[0]);
+      } else {
+        setSelectedProject(null);
+        setIssues([]);
+      }
+    }
+  };
+
   // 로그아웃 핸들러
   const handleLogout = async () => {
     const supabase = getSupabaseClient();
@@ -442,6 +479,7 @@ function App() {
             onSelectIssue={setSelectedIssue}
             issues={issues}
             projects={projects}
+            onDeleteProject={handleDeleteProject}
           />
         )}
 
