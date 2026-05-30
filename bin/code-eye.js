@@ -111,6 +111,32 @@ const ensureSupabaseCredentials = async () => {
   return true;
 };
 
+const ensureGcpCredentials = async () => {
+  const currentConfig = loadSessionConfig();
+  let gcpProjectId = process.env.VITE_GCP_PROJECT_ID || env.VITE_GCP_PROJECT_ID || currentConfig.gcp_project_id || '';
+
+  if (gcpProjectId) return gcpProjectId;
+
+  console.log('\n\x1b[33m[Notice] Google Cloud Project ID 정보가 필요합니다.\x1b[0m');
+  console.log('Google Cloud Console에서 생성한 프로젝트 ID(예: test-425102)를 입력해 주세요. (정보는 ~/.code-eye-config.json 에 자동 캐싱됩니다.)\n');
+
+  gcpProjectId = await askQuestion('🔗 Google Cloud Project ID 입력: ');
+
+  if (!gcpProjectId) {
+    console.error('\x1b[31m[Error] Google Cloud Project ID 입력이 비어있어 작업을 계속할 수 없습니다.\x1b[0m');
+    process.exit(1);
+  }
+
+  // 캐싱을 위한 저장
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+    ...currentConfig,
+    gcp_project_id: gcpProjectId
+  }, null, 2));
+
+  console.log('\x1b[32m- Google Cloud Project ID가 로컬 세션 파일에 임시 캐싱되었습니다.\x1b[0m\n');
+  return gcpProjectId;
+};
+
 // ----------------------------------------------------
 // 3. Python 환경 감지 및 가상환경 (.venv) 자율 셋업
 // ----------------------------------------------------
@@ -240,7 +266,7 @@ const handleLogin = async () => {
 
   server.listen(port, () => {
     // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/cloud-platform&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
     console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
@@ -266,7 +292,7 @@ const runLinterAnalysis = (targetPath, bin) => {
   const banditIssues = [];
 
   try {
-    const radonResRaw = execSync(`"${bin.radonPath}" cc "${targetPath}" -j`, { encoding: 'utf-8' });
+    const radonResRaw = execSync(`"${bin.radonPath}" cc "${targetPath}" -j -x "node_modules,.venv,.git,dist"`, { encoding: 'utf-8' });
     const radonJson = JSON.parse(radonResRaw);
     
     Object.keys(radonJson).forEach(filePath => {
@@ -296,7 +322,7 @@ const runLinterAnalysis = (targetPath, bin) => {
   }
 
   try {
-    const banditResRaw = execSync(`"${bin.banditPath}" -r "${targetPath}" -f json`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    const banditResRaw = execSync(`"${bin.banditPath}" -r "${targetPath}" -f json -x "node_modules,.venv,.git,dist"`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
     const banditJson = JSON.parse(banditResRaw);
     
     if (banditJson.results && Array.isArray(banditJson.results)) {
@@ -437,6 +463,17 @@ const handleAnalyze = async (targetPath, projectId) => {
     process.exit(1);
   }
 
+  let ownerId = 'usr-1';
+  try {
+    const payloadBase64 = supabaseToken.split('.')[1];
+    if (payloadBase64) {
+      const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+      if (decoded && decoded.sub) {
+        ownerId = decoded.sub;
+      }
+    }
+  } catch (e) {}
+
   const resolvedPath = path.resolve(targetPath);
   let activeProjectId = projectId;
   const folderName = path.basename(resolvedPath) || 'Local Project';
@@ -471,17 +508,6 @@ const handleAnalyze = async (targetPath, projectId) => {
       // 2. 존재하지 않는다면 새 프로젝트 자동 생성 및 등록
       if (!activeProjectId) {
         const newProjId = crypto.randomUUID();
-        let ownerId = 'usr-1';
-        try {
-          const payloadBase64 = supabaseToken.split('.')[1];
-          if (payloadBase64) {
-            const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-            if (decoded && decoded.sub) {
-              ownerId = decoded.sub;
-            }
-          }
-        } catch (e) {}
-
         const projCreateRes = await fetch(`${SUPABASE_URL}/rest/v1/projects`, {
           method: 'POST',
           headers: dbHeaders,
@@ -514,21 +540,26 @@ const handleAnalyze = async (targetPath, projectId) => {
   // targetPath의 resolvedPath 출력을 위로 양보함
   console.log(`\n\x1b[32m[CODE EYE] 로컬 분석 대상 디렉토리: ${resolvedPath}\x1b[0m`);
 
-  // 8-2. Python 가상환경 셋업 및 Linter 실행
-  let linterIssues = [];
-  const bin = setupVirtualEnv(resolvedPath);
-  if (bin) {
-    linterIssues = runLinterAnalysis(resolvedPath, bin);
-    console.log(`\x1b[32m- 로컬 Linter 감지 성공 (검출된 물리 결함: ${linterIssues.length}개)\x1b[0m\n`);
-  } else {
-    console.log('\x1b[33m- 파이썬 정적 툴 미감지로 인해 Linter 단계 생략 (Fallback AI 단독 모드로 이행)\x1b[0m\n');
-  }
-
   // 8-3. 다국어 코드 파일 수집
   const sourceFiles = collectSourceFiles(resolvedPath);
   if (sourceFiles.length === 0) {
     console.error('\x1b[31m[Error] 분석 가능한 다국어 소스코드 파일이 대상 경로에 존재하지 않습니다.\x1b[0m');
     process.exit(1);
+  }
+
+  // 8-2. Python 가상환경 셋업 및 Linter 실행 (파이썬 파일이 존재하는 경우에만)
+  let linterIssues = [];
+  const hasPythonFiles = sourceFiles.some(f => f.relPath.endsWith('.py'));
+  if (hasPythonFiles) {
+    const bin = setupVirtualEnv(resolvedPath);
+    if (bin) {
+      linterIssues = runLinterAnalysis(resolvedPath, bin);
+      console.log(`\x1b[32m- 로컬 Linter 감지 성공 (검출된 물리 결함: ${linterIssues.length}개)\x1b[0m\n`);
+    } else {
+      console.log('\x1b[33m- 파이썬 정적 툴 미감지로 인해 Linter 단계 생략 (Fallback AI 단독 모드로 이행)\x1b[0m\n');
+    }
+  } else {
+    console.log('\x1b[33m- 파이썬(*.py) 소스코드가 없어 Linter 단계를 생략합니다. (AI 단독 스캔 진행)\x1b[0m\n');
   }
 
   console.log(`\x1b[34m[Gemini] 2단계: Gemini 3.5 Flash AI 심층 진단 구동 중... (대상 파일수: ${sourceFiles.length}개)\x1b[0m`);
@@ -551,8 +582,10 @@ const handleAnalyze = async (targetPath, projectId) => {
     const headers = { 'Content-Type': 'application/json' };
 
     if (googleToken) {
+      const gcpProjectId = await ensureGcpCredentials();
       url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
       headers['Authorization'] = `Bearer ${googleToken}`;
+      headers['x-goog-user-project'] = gcpProjectId;
     } else {
       if (!GEMINI_API_KEY) {
         console.warn(`    \x1b[31m[Warning] ${file.relPath} 스캔 생략 (구글 인증 토큰 및 VITE_GEMINI_API_KEY 부재)\x1b[0m`);
@@ -650,6 +683,7 @@ ${linterSummaryText ? `\n참고할 정적 Linter 진단 결과는 아래와 같�
       body: JSON.stringify({
         id: runId,
         project_id: activeProjectId,
+        triggered_by: ownerId,
         status: 'completed',
         source_type: 'manual',
         total_files: sourceFiles.length,

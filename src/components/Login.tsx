@@ -30,7 +30,7 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
         provider: 'google',
         options: {
           redirectTo: window.location.origin,
-          scopes: 'https://www.googleapis.com/auth/generative-language',
+          scopes: 'https://www.googleapis.com/auth/cloud-platform',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent'
