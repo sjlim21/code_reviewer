@@ -53,6 +53,11 @@ function App() {
         localStorage.setItem('google_oauth_provider_token', initialSession.provider_token);
       }
       setIsLoadingSession(false);
+      
+      // OAuth 리다이렉션 해시 파라미터 클리닝으로 무한 인증 상태 변경 루프 방지
+      if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
     });
 
     // 인증 상태 변화 리스너 등록
@@ -66,7 +71,8 @@ function App() {
       });
       
       if (currentSession) {
-        setIsDemoSession(false); // 구글 인증 성공 시 데모 세션 강제 종료
+        // 가딩 적용: 이미 데모 세션이 꺼져있는 경우 상태 변화 렌더 트리거 방지
+        setIsDemoSession(prev => prev ? false : prev);
         if (currentSession.provider_token) {
           localStorage.setItem('google_oauth_provider_token', currentSession.provider_token);
         }
@@ -78,30 +84,38 @@ function App() {
     };
   }, []);
 
-  // 2. 로그인 완료 후 실시간 DB로부터 데이터 패칭
+  // 2. 로그인 완료 후 실시간 DB로부터 데이터 패칭 (경합 조건 및 무한 루프 방어 패치)
   useEffect(() => {
+    let ignore = false;
+
     const loadDBData = async () => {
       const supabase = getSupabaseClient();
       
-      // 구글 인증도 없고 가상 데모 세션도 없으면 패칭 중단
+      // 인증도 없고 가상 데모 세션도 없으면 패칭 중단
       if (!session && !isDemoSession) {
-        setProjects([]);
-        setIssues([]);
+        if (!ignore) {
+          setProjects([]);
+          setIssues([]);
+        }
         return;
       }
 
       if (!supabase || isDemoSession) {
         // Fallback to Mock Data
         console.log("Using Mock fallback data (Demo Session).");
-        setProjects(mockProjects);
-        setIssues(mockIssues);
-        setSelectedProject(mockProjects[0]);
-        setIsUsingRealDB(false);
+        if (!ignore) {
+          setProjects(mockProjects);
+          setIssues(mockIssues);
+          setSelectedProject(mockProjects[0]);
+          setIsUsingRealDB(false);
+        }
         return;
       }
 
       try {
-        setIsUsingRealDB(true);
+        if (!ignore) {
+          setIsUsingRealDB(true);
+        }
         
         // 프로젝트 로드
         const { data: dbProjects, error: projError } = await supabase
@@ -110,6 +124,7 @@ function App() {
           .order('created_at', { ascending: false });
 
         if (projError) throw projError;
+        if (ignore) return;
 
         if (dbProjects && dbProjects.length > 0) {
           setProjects(dbProjects as Project[]);
@@ -128,29 +143,41 @@ function App() {
             .order('priority_score', { ascending: false });
 
           if (issuesError) throw issuesError;
-          setIssues(dbIssues as Issue[]);
+          if (!ignore) {
+            setIssues(dbIssues as Issue[]);
+          }
         } else {
-          setProjects([]);
-          setIssues([]);
-          setSelectedProject(null);
+          if (!ignore) {
+            setProjects([]);
+            setIssues([]);
+            setSelectedProject(null);
+          }
         }
 
       } catch (err) {
         console.error("Supabase load error:", err);
-        // 로그인된 상태에서는 에러가 나더라도 데모 모드로 롤백하여 깜빡임 무한 루프를 유발하지 않도록 격리
-        setProjects([]);
-        setIssues([]);
-        setSelectedProject(null);
+        if (!ignore) {
+          setProjects([]);
+          setIssues([]);
+          setSelectedProject(null);
+          setIsUsingRealDB(false);
+        }
       }
     };
 
     if (!isLoadingSession) {
       loadDBData();
     }
+
+    return () => {
+      ignore = true;
+    };
   }, [session?.user?.id, isDemoSession, isLoadingSession]);
 
-  // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드
+  // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드 (문자열 ID 의존성 매핑 및 경합 방지)
   useEffect(() => {
+    let ignore = false;
+
     const fetchIssuesForProject = async () => {
       if (!selectedProject || !isUsingRealDB) return;
       const supabase = getSupabaseClient();
@@ -164,16 +191,22 @@ function App() {
           .order('priority_score', { ascending: false });
 
         if (error) throw error;
-        setIssues(dbIssues as Issue[]);
+        if (!ignore) {
+          setIssues(dbIssues as Issue[]);
+        }
       } catch (err) {
         console.error("Fetch issues error:", err);
       }
     };
 
     fetchIssuesForProject();
-  }, [selectedProject, isUsingRealDB]);
 
-  // 4. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지)
+    return () => {
+      ignore = true;
+    };
+  }, [selectedProject?.id, isUsingRealDB]);
+
+  // 4. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지, ID 의존성 패치)
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!supabase || !selectedProject || !isUsingRealDB) return;
@@ -205,7 +238,7 @@ function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedProject, isUsingRealDB]);
+  }, [selectedProject?.id, isUsingRealDB]);
 
   // 5. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함)
   const handleUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
