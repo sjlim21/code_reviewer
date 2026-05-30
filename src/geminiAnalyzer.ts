@@ -40,7 +40,9 @@ export const analyzeCodeWithGemini = async (
     'Content-Type': 'application/json',
   };
 
-  if (providerToken) {
+  if (apiKey) {
+    url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+  } else if (providerToken) {
     // Google OAuth Access Token을 베어러 토큰으로 헤더에 탑재
     url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
     headers['Authorization'] = `Bearer ${providerToken}`;
@@ -49,10 +51,7 @@ export const analyzeCodeWithGemini = async (
       headers['x-goog-user-project'] = gcpProjectId;
     }
   } else {
-    if (!apiKey) {
-      throw new Error("분석을 실행하기 위한 구글 인증 세션(OAuth) 또는 시스템 API Key(VITE_GEMINI_API_KEY)가 부재합니다.");
-    }
-    url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+    throw new Error("분석을 실행하기 위한 구글 인증 세션(OAuth) 또는 시스템 API Key(VITE_GEMINI_API_KEY)가 부재합니다.");
   }
 
   const systemPrompt = agentPrompt;

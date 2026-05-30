@@ -593,17 +593,16 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
     let url = '';
     const headers = { 'Content-Type': 'application/json' };
 
-    if (googleToken) {
+    if (GEMINI_API_KEY) {
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    } else if (googleToken) {
       const gcpProjectId = await ensureGcpCredentials(customGcpProjectId);
       url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
       headers['Authorization'] = `Bearer ${googleToken}`;
       headers['x-goog-user-project'] = gcpProjectId;
     } else {
-      if (!GEMINI_API_KEY) {
-        console.warn(`    \x1b[31m[Warning] ${file.relPath} 스캔 생략 (구글 인증 토큰 및 VITE_GEMINI_API_KEY 부재)\x1b[0m`);
-        continue;
-      }
-      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      console.warn(`    \x1b[31m[Warning] ${file.relPath} 스캔 생략 (구글 인증 토큰 및 VITE_GEMINI_API_KEY 부재)\x1b[0m`);
+      continue;
     }
 
     const userPrompt = `File Path: ${file.relPath}
