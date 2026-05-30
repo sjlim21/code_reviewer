@@ -57,7 +57,14 @@ function App() {
 
     // 인증 상태 변화 리스너 등록
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession(currentSession);
+      setSession((prev: any) => {
+        // 동일 사용자 세션인 경우 상태 변경을 생략하여 무한 렌더링 루프 방지
+        if (prev?.user?.id === currentSession?.user?.id) {
+          return prev;
+        }
+        return currentSession;
+      });
+      
       if (currentSession) {
         setIsDemoSession(false); // 구글 인증 성공 시 데모 세션 강제 종료
         if (currentSession.provider_token) {
@@ -140,7 +147,7 @@ function App() {
     if (!isLoadingSession) {
       loadDBData();
     }
-  }, [session, isDemoSession, isLoadingSession]);
+  }, [session?.user?.id, isDemoSession, isLoadingSession]);
 
   // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드
   useEffect(() => {
