@@ -111,9 +111,21 @@ const ensureSupabaseCredentials = async () => {
   return true;
 };
 
-const ensureGcpCredentials = async () => {
+const ensureGcpCredentials = async (customGcpProjectId) => {
   const currentConfig = loadSessionConfig();
-  let gcpProjectId = process.env.VITE_GCP_PROJECT_ID || env.VITE_GCP_PROJECT_ID || currentConfig.gcp_project_id || '';
+  let gcpProjectId = customGcpProjectId || process.env.VITE_GCP_PROJECT_ID || env.VITE_GCP_PROJECT_ID || currentConfig.gcp_project_id || '';
+
+  if (customGcpProjectId && customGcpProjectId !== currentConfig.gcp_project_id) {
+    const updatedConfig = {
+      ...currentConfig,
+      gcp_project_id: customGcpProjectId
+    };
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2));
+    gcpProjectId = customGcpProjectId;
+  }
+
+  console.log(`[Debug] gcpProjectId 후보군: custom=${customGcpProjectId}, env.process=${process.env.VITE_GCP_PROJECT_ID}, env.file=${env.VITE_GCP_PROJECT_ID}, config.json=${currentConfig.gcp_project_id}`);
+  console.log(`[Debug] 최종 매핑된 gcpProjectId: "${gcpProjectId}"`);
 
   if (gcpProjectId) return gcpProjectId;
 
@@ -444,7 +456,7 @@ const deduplicateIssues = (aiIssues, linterIssues) => {
 // ----------------------------------------------------
 // 9. 핵심 실행 파이프라인 (Analyze)
 // ----------------------------------------------------
-const handleAnalyze = async (targetPath, projectId) => {
+const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
   await ensureSupabaseCredentials();
 
   let supabaseToken = '';
@@ -582,7 +594,7 @@ const handleAnalyze = async (targetPath, projectId) => {
     const headers = { 'Content-Type': 'application/json' };
 
     if (googleToken) {
-      const gcpProjectId = await ensureGcpCredentials();
+      const gcpProjectId = await ensureGcpCredentials(customGcpProjectId);
       url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
       headers['Authorization'] = `Bearer ${googleToken}`;
       headers['x-goog-user-project'] = gcpProjectId;
@@ -774,19 +786,27 @@ const main = () => {
   } else if (command === 'analyze') {
     const targetPath = args[1];
     let projectId = '';
+    let gcpProjectId = '';
 
     const projIdx = args.indexOf('--project');
     if (projIdx !== -1 && args[projIdx + 1]) {
       projectId = args[projIdx + 1];
+    } else if (args[2] && args[2] !== '--project' && args[2] !== '--gcp-project') {
+      projectId = args[2];
+    }
+
+    const gcpIdx = args.indexOf('--gcp-project');
+    if (gcpIdx !== -1 && args[gcpIdx + 1]) {
+      gcpProjectId = args[gcpIdx + 1];
     }
 
     if (!targetPath) {
       console.error('\x1b[31m[Error] 분석할 대상 경로가 명시되지 않았습니다.\x1b[0m');
-      console.log('예: node bin/code-eye.js analyze ./src [--project PROJECT_ID]');
+      console.log('예: node bin/code-eye.js analyze ./src [--project PROJECT_ID] [--gcp-project GCP_ID]');
       process.exit(1);
     }
 
-    handleAnalyze(targetPath, projectId);
+    handleAnalyze(targetPath, projectId, gcpProjectId);
   } else {
     printHelp();
   }
