@@ -278,7 +278,7 @@ const handleLogin = async () => {
 
   server.listen(port, () => {
     // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/cloud-platform&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
     console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
@@ -647,7 +647,8 @@ ${linterSummaryText ? `\n참고할 정적 Linter 진단 결과는 아래와 같�
       });
 
       if (!response.ok) {
-        console.warn(`    \x1b[31m[Warning] ${file.relPath} AI 스캔 에러 (HTTP ${response.status})\x1b[0m`);
+        const errText = await response.text();
+        console.warn(`    \x1b[31m[Warning] ${file.relPath} AI 스캔 에러 (HTTP ${response.status}): ${errText}\x1b[0m`);
         continue;
       }
 
