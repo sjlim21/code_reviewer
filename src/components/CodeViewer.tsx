@@ -19,6 +19,22 @@ import 'prismjs/themes/prism-tomorrow.css';
 import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-python';
 
+// AI 제안 내용(마크다운 코드블록 등 포함)에서 교체할 순수 소스코드를 추출하는 헬퍼 함수
+const extractCleanCode = (suggestion: string): string => {
+  // 마크다운 코드블록(```tsx ... ``` 등)이 있는지 확인하고 내용만 추출
+  const codeBlockRegex = /```(?:[a-zA-Z0-9-]*)\n([\s\S]*?)```/;
+  const match = suggestion.match(codeBlockRegex);
+  let code = match ? match[1] : suggestion;
+
+  // # TO-BE, // TO-BE 등의 설명성 주석 라인이 상단에 포함되어 있다면 이를 정제
+  code = code
+    .replace(/^#\s*TO-BE\n/mi, '')
+    .replace(/^\/\/\s*TO-BE\n/mi, '')
+    .trim();
+
+  return code;
+};
+
 interface CodeViewerProps {
   issue: Issue | null;
   onClose: () => void;
@@ -80,17 +96,9 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
     const owner = 'sjlim21';
     const repo = 'code_reviewer';
     const filePath = issue.file_path;
-    
-    // Suggestion 코드가 파이썬/JS AS-IS/TO-BE 구분을 제거하고 핵심 코드를 가져옵니다.
-    // Suggestion 내의 주석 '# TO-BE' 이하의 내용만 파싱하거나 전체 Suggestion을 base64로 전송합니다.
-    const cleanContent = issue.suggestion
-      .replace(/^#\s*TO-BE\n/m, '')
-      .replace(/^\/\/ \s*TO-BE\n/m, '');
-      
-    const base64Content = btoa(unescape(encodeURIComponent(cleanContent)));
 
     try {
-      // 1. 기존 파일의 SHA 조회
+      // 1. 기존 파일 조회 및 메타데이터 획득
       const getRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
         headers: {
           'Authorization': `token ${token}`,
@@ -104,6 +112,29 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
 
       const fileData = await getRes.json();
       const sha = fileData.sha;
+      const originalBase64 = fileData.content;
+
+      // Base64 디코딩 (유니코드/한글 대응)
+      const originalText = decodeURIComponent(escape(atob(originalBase64.replace(/\s/g, ''))));
+      const cleanContent = extractCleanCode(issue.suggestion);
+
+      // 라인 단위로 기존 코드를 쪼갠 뒤 특정 에러 영역을 치환
+      const lines = originalText.split(/\r?\n/);
+      const startIdx = (issue.line_start && issue.line_start > 0 && issue.line_start <= lines.length)
+        ? issue.line_start - 1
+        : 0;
+      const endIdx = (issue.line_end && issue.line_end > 0 && issue.line_end <= lines.length)
+        ? issue.line_end - 1
+        : lines.length - 1;
+
+      const newLines = [
+        ...lines.slice(0, startIdx),
+        cleanContent,
+        ...lines.slice(endIdx + 1)
+      ];
+
+      const updatedText = newLines.join('\n');
+      const base64Content = btoa(unescape(encodeURIComponent(updatedText)));
 
       // 2. 파일 업데이트 커밋 전송
       const putRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
