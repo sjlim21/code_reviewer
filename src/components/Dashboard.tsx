@@ -145,8 +145,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   >
                     <div>
                       <div className="font-semibold text-sm text-slate-100">{proj.name}</div>
-                      <div className="text-[10px] font-mono text-slate-500 mt-1 uppercase tracking-wider">
-                        {proj.language}
+                      <div className="text-[10px] font-mono text-slate-500 mt-1 flex items-center justify-between w-full">
+                        <span className="uppercase tracking-wider">{proj.language}</span>
+                        <span className="text-slate-700 font-sans lowercase truncate max-w-[90px] ml-2">id: {proj.id}</span>
                       </div>
                     </div>
                     <ChevronRight size={14} className={isActive ? 'text-indigo-400' : 'text-slate-600'} />
@@ -157,17 +158,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           
           {selectedProject && (
-            <div className="mt-6 pt-4 border-t border-slate-800/80">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Repository</div>
-              <a 
-                href={selectedProject.repo_url} 
-                target="_blank" 
-                rel="noreferrer" 
-                className="text-xs text-indigo-400 truncate block hover:underline hover:text-indigo-300 mt-1 flex items-center gap-1"
-              >
-                <span>{selectedProject.repo_url}</span>
-                <ArrowUpRight size={12} />
-              </a>
+            <div className="mt-6 pt-4 border-t border-slate-800/80 space-y-4">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Project ID</div>
+                <div className="flex items-center justify-between gap-2 mt-1 bg-slate-950/40 px-2 py-1.5 rounded-lg border border-slate-800/80">
+                  <span className="text-[10px] font-mono text-slate-300 truncate max-w-[120px] xl:max-w-[140px]" title={selectedProject.id}>
+                    {selectedProject.id}
+                  </span>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedProject.id);
+                      alert('프로젝트 ID가 클립보드에 복사되었습니다.');
+                    }}
+                    className="text-[9px] font-bold text-indigo-400 hover:text-indigo-300 font-sans cursor-pointer uppercase shrink-0"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Repository</div>
+                <a 
+                  href={selectedProject.repo_url} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-xs text-indigo-400 truncate block hover:underline hover:text-indigo-300 mt-1 flex items-center gap-1"
+                >
+                  <span>{selectedProject.repo_url}</span>
+                  <ArrowUpRight size={12} />
+                </a>
+              </div>
             </div>
           )}
         </div>
