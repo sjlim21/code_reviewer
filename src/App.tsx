@@ -106,7 +106,12 @@ function App() {
 
         if (dbProjects && dbProjects.length > 0) {
           setProjects(dbProjects as Project[]);
-          setSelectedProject(dbProjects[0] as Project);
+          setSelectedProject(current => {
+            if (current && dbProjects.some(p => p.id === current.id)) {
+              return current;
+            }
+            return dbProjects[0] as Project;
+          });
           
           // 첫 번째 프로젝트의 이슈 로드
           const { data: dbIssues, error: issuesError } = await supabase
@@ -120,14 +125,15 @@ function App() {
         } else {
           setProjects([]);
           setIssues([]);
+          setSelectedProject(null);
         }
 
       } catch (err) {
-        console.error("Supabase load error, switching to simulation fallback:", err);
-        setProjects(mockProjects);
-        setIssues(mockIssues);
-        setSelectedProject(mockProjects[0]);
-        setIsUsingRealDB(false);
+        console.error("Supabase load error:", err);
+        // 로그인된 상태에서는 에러가 나더라도 데모 모드로 롤백하여 깜빡임 무한 루프를 유발하지 않도록 격리
+        setProjects([]);
+        setIssues([]);
+        setSelectedProject(null);
       }
     };
 
