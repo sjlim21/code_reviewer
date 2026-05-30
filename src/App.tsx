@@ -49,6 +49,9 @@ function App() {
     // 초기 세션 획득
     supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
       setSession(initialSession);
+      if (initialSession?.provider_token) {
+        localStorage.setItem('google_oauth_provider_token', initialSession.provider_token);
+      }
       setIsLoadingSession(false);
     });
 
@@ -57,6 +60,9 @@ function App() {
       setSession(currentSession);
       if (currentSession) {
         setIsDemoSession(false); // 구글 인증 성공 시 데모 세션 강제 종료
+        if (currentSession.provider_token) {
+          localStorage.setItem('google_oauth_provider_token', currentSession.provider_token);
+        }
       }
     });
 
@@ -242,6 +248,7 @@ function App() {
     setSelectedProject(null);
     setProjects([]);
     setIssues([]);
+    localStorage.removeItem('google_oauth_provider_token');
   };
 
   // 로딩 화면
@@ -397,6 +404,7 @@ function App() {
             <Uploader 
               selectedProject={selectedProject} 
               onAnalysisComplete={handleAnalysisComplete}
+              session={session}
             />
           </div>
         )}

@@ -1,4 +1,5 @@
 import { type Issue } from './supabase';
+import agentPrompt from './agents/code-reviewer-agent.md?raw';
 
 interface GeminiIssueResponse {
   title: string;
@@ -29,26 +30,29 @@ export const analyzeCodeWithGemini = async (
   fileName: string,
   codeContent: string,
   projectId: string,
-  runId: string
+  runId: string,
+  providerToken?: string
 ): Promise<Issue[]> => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
-  if (!apiKey) {
-    throw new Error("시스템 전역 Gemini API Key가 설정되지 않았습니다. 호스트 환경변수(VITE_GEMINI_API_KEY)를 확인해 주세요.");
+  if (!apiKey && !providerToken) {
+    throw new Error("분석을 실행하기 위한 시스템 Gemini API Key 또는 Google OAuth 로그인 세션이 부재합니다. 구글 로그인을 확인해 주세요.");
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  // Google OAuth Access Token이 있다면 Bearer 헤더를 사용하고, 없다면 전역 API Key 파라미터를 사용합니다.
+  const url = providerToken
+    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-  const systemPrompt = `You are a world-class static code analyzer and AI reviewer.
-Your goal is to inspect the uploaded file and identify critical security vulnerabilities (e.g. SQL Injection, command injection, secret/credential leak), logical bugs, performance bottlenecks, and bad code smells.
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
 
-For each issue found:
-- Extract the exact lines and code_snippet.
-- Categorize it properly.
-- Rate the severity level (critical, high, medium, low, info).
-- Write a detailed TO-BE suggestions block showing how to refactor this issue.
+  if (providerToken) {
+    headers['Authorization'] = `Bearer ${providerToken}`;
+  }
 
-Response must strictly match the requested JSON schema array.`;
+  const systemPrompt = agentPrompt;
 
   const userPrompt = `File Name: ${fileName}
 Content:
@@ -58,9 +62,8 @@ ${codeContent}
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
+
     body: JSON.stringify({
       contents: [{
         parts: [{

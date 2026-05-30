@@ -6,11 +6,13 @@ import { analyzeCodeWithGemini } from '../geminiAnalyzer';
 interface UploaderProps {
   selectedProject: Project | null;
   onAnalysisComplete: (newIssues: Issue[]) => void;
+  session?: any;
 }
 
 export const Uploader: React.FC<UploaderProps> = ({
   selectedProject,
-  onAnalysisComplete
+  onAnalysisComplete,
+  session
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'done'>('idle');
@@ -73,11 +75,14 @@ export const Uploader: React.FC<UploaderProps> = ({
 
       // 3. Gemini API를 이용한 코드 취약점 & 결함 진단 가동
       setProgress(60);
+      const googleToken = localStorage.getItem('google_oauth_provider_token') || session?.provider_token || undefined;
+
       const detectedIssues = await analyzeCodeWithGemini(
         file.name,
         codeContent,
         selectedProject?.id || 'prj-1',
-        runId
+        runId,
+        googleToken
       );
 
       // 4. 분석 결과(이슈)들을 Supabase DB에 대량 삽입
@@ -251,8 +256,8 @@ export const Uploader: React.FC<UploaderProps> = ({
                 분석할 소스코드 파일을 올려놓거나 선택하세요
               </p>
               <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
-                Gemini 2.5 Pro/Flash 모델이 구문 분석(AST), 취약점 위협 식별,<br />
-                그리고 TO-BE 개선 추천 코드를 실시간 인출합니다.
+                내장형 CODE EYE 에이전트가 구문 분석(AST), 취약점 위협 식별,<br />
+                그리고 TO-BE 개선 추천 코드를 실시간 분석/인출합니다.
               </p>
             </div>
           </div>
