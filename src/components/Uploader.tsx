@@ -10,6 +10,7 @@ interface UploaderProps {
   projects?: Project[];
   onProjectCreated?: (newProj: Project) => void;
   onProjectSelected?: (proj: Project) => void;
+  googleToken?: string;
 }
 
 export const Uploader: React.FC<UploaderProps> = ({
@@ -18,7 +19,8 @@ export const Uploader: React.FC<UploaderProps> = ({
   session,
   projects,
   onProjectCreated,
-  onProjectSelected
+  onProjectSelected,
+  googleToken
 }) => {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'done'>('idle');
   const [progress, setProgress] = useState(0);
@@ -160,8 +162,8 @@ export const Uploader: React.FC<UploaderProps> = ({
         });
 
         try {
-          // 로컬 스토리지에서 Google OAuth Access Token 추출
-          const googleToken = localStorage.getItem('google_oauth_provider_token') || '';
+          // 주입받은 Google OAuth Access Token 사용 (메모리 보관으로 보안 강화)
+          const activeToken = googleToken || '';
 
           // Gemini API 스캔 (Google OAuth 토큰 전달)
           const detectedIssues = await analyzeCodeWithGemini(
@@ -169,7 +171,7 @@ export const Uploader: React.FC<UploaderProps> = ({
             codeContent,
             activeProjId,
             runId,
-            googleToken
+            activeToken
           );
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {

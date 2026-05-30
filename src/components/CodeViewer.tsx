@@ -6,7 +6,6 @@ import {
   mockProfiles 
 } from '../supabase';
 import { 
-  Check, 
   GitCommit, 
   MessageSquare, 
   Send, 
@@ -19,21 +18,6 @@ import 'prismjs/themes/prism-tomorrow.css';
 import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-python';
 
-// AI 제안 내용(마크다운 코드블록 등 포함)에서 교체할 순수 소스코드를 추출하는 헬퍼 함수
-const extractCleanCode = (suggestion: string): string => {
-  // 마크다운 코드블록(```tsx ... ``` 등)이 있는지 확인하고 내용만 추출
-  const codeBlockRegex = /```(?:[a-zA-Z0-9-]*)\n([\s\S]*?)```/;
-  const match = suggestion.match(codeBlockRegex);
-  let code = match ? match[1] : suggestion;
-
-  // # TO-BE, // TO-BE 등의 설명성 주석 라인이 상단에 포함되어 있다면 이를 정제
-  code = code
-    .replace(/^#\s*TO-BE\n/mi, '')
-    .replace(/^\/\/\s*TO-BE\n/mi, '')
-    .trim();
-
-  return code;
-};
 
 interface CodeViewerProps {
   issue: Issue | null;
@@ -48,8 +32,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
 }) => {
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [newCommentText, setNewCommentText] = useState('');
-  const [isCommitting, setIsCommitting] = useState(false);
-  const [commitSuccess, setCommitSuccess] = useState(false);
+
   
   const commentsEndRef = useRef<HTMLDivElement>(null);
 
@@ -88,110 +71,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
     setNewCommentText('');
   };
 
-  const handleApplyFix = async () => {
-    setIsCommitting(true);
-    setCommitSuccess(false);
 
-    const token = import.meta.env.VITE_GITHUB_TOKEN || ''; // Loaded from .env
-    const owner = 'sjlim21';
-    const repo = 'code_reviewer';
-    const filePath = issue.file_path;
-
-    try {
-      // 1. 기존 파일 조회 및 메타데이터 획득
-      const getRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json'
-        }
-      });
-
-      if (!getRes.ok) {
-        throw new Error(`Failed to fetch file metadata: ${getRes.statusText}`);
-      }
-
-      const fileData = await getRes.json();
-      const sha = fileData.sha;
-      const originalBase64 = fileData.content;
-
-      // Base64 디코딩 (유니코드/한글 대응)
-      const originalText = decodeURIComponent(escape(atob(originalBase64.replace(/\s/g, ''))));
-      const cleanContent = extractCleanCode(issue.suggestion);
-
-      // 라인 단위로 기존 코드를 쪼갠 뒤 특정 에러 영역을 치환
-      const lines = originalText.split(/\r?\n/);
-      const startIdx = (issue.line_start && issue.line_start > 0 && issue.line_start <= lines.length)
-        ? issue.line_start - 1
-        : 0;
-      const endIdx = (issue.line_end && issue.line_end > 0 && issue.line_end <= lines.length)
-        ? issue.line_end - 1
-        : lines.length - 1;
-
-      const newLines = [
-        ...lines.slice(0, startIdx),
-        cleanContent,
-        ...lines.slice(endIdx + 1)
-      ];
-
-      const updatedText = newLines.join('\n');
-      const base64Content = btoa(unescape(encodeURIComponent(updatedText)));
-
-      // 2. 파일 업데이트 커밋 전송
-      const putRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `token ${token}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/vnd.github.v3+json'
-        },
-        body: JSON.stringify({
-          message: `refactor: fix auto-detected issue - ${issue.title}`,
-          content: base64Content,
-          sha: sha,
-          branch: 'main'
-        })
-      });
-
-      if (!putRes.ok) {
-        throw new Error(`Commit failed: ${putRes.statusText}`);
-      }
-
-      const commitData = await putRes.json();
-      
-      setIsCommitting(false);
-      setCommitSuccess(true);
-      onUpdateStatus(issue.id, 'resolved');
-
-      // 성공 메시지 추가
-      const successComment: IssueComment = {
-        id: `cmt-${Date.now()}`,
-        issue_id: issue.id,
-        author_id: 'usr-1',
-        content: `🚀 [GitHub Integration] '${filePath}' 소스코드가 실제 GitHub 저장소 sjlim21/code_reviewer에 커밋되었습니다. (Commit: ${commitData.commit.sha.substring(0, 7)})`,
-        created_at: new Date().toISOString()
-      };
-      setComments(prev => [...prev, successComment]);
-
-    } catch (err: any) {
-      console.warn("GitHub API error, using simulation fallback:", err.message);
-      
-      // 권한 제약 또는 레포 미설정 시 로컬 가상 커밋으로 대체
-      setTimeout(() => {
-        setIsCommitting(false);
-        setCommitSuccess(true);
-        onUpdateStatus(issue.id, 'resolved');
-        
-        const sysComment: IssueComment = {
-          id: `cmt-${Date.now()}`,
-          issue_id: issue.id,
-          author_id: 'usr-1',
-          content: `🤖 [System Action] 깃허브 쓰기 권한 제한으로 인해 로컬 메모리에 모킹 가상 커밋을 갱신하였습니다. (Commit ID: vir_${Math.random().toString(36).substring(2, 9)})`,
-          created_at: new Date().toISOString()
-        };
-        setComments(prev => [...prev, sysComment]);
-      }, 2000);
-    }
-  };
 
   const getSeverityBadge = (sev: Issue['severity']) => {
     const classes = {
@@ -262,29 +142,15 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
                 AI 개선 가이드 (TO-BE Suggestion)
               </h3>
               
-              {/* Fix button */}
+              {/* Fix button - 보안 권고로 인한 비활성화 */}
               {issue.status !== 'resolved' && (
                 <button
-                  onClick={handleApplyFix}
-                  disabled={isCommitting}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/10"
+                  disabled={true}
+                  className="bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                  title="보안 권고: 구문 손상 방지 및 안전한 코드 검토를 위해 코드 자동 수정 기능이 완전히 비활성화되었습니다."
                 >
-                  {isCommitting ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      커밋 반영 중...
-                    </>
-                  ) : commitSuccess ? (
-                    <>
-                      <Check size={14} />
-                      커밋 완료!
-                    </>
-                  ) : (
-                    <>
-                      <GitCommit size={14} />
-                      코드 자동 수정 & Commit
-                    </>
-                  )}
+                  <GitCommit size={14} />
+                  자동 수정 비활성화됨
                 </button>
               )}
             </div>

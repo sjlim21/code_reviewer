@@ -34,6 +34,7 @@ function App() {
   
   // 인증 및 세션 상태 추가
   const [session, setSession] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string>('');
   const [isDemoSession, setIsDemoSession] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
 
@@ -50,7 +51,7 @@ function App() {
     supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
       setSession(initialSession);
       if (initialSession?.provider_token) {
-        localStorage.setItem('google_oauth_provider_token', initialSession.provider_token);
+        setGoogleToken(initialSession.provider_token);
       }
       setIsLoadingSession(false);
       
@@ -74,7 +75,7 @@ function App() {
         // 가딩 적용: 이미 데모 세션이 꺼져있는 경우 상태 변화 렌더 트리거 방지
         setIsDemoSession(prev => prev ? false : prev);
         if (currentSession.provider_token) {
-          localStorage.setItem('google_oauth_provider_token', currentSession.provider_token);
+          setGoogleToken(currentSession.provider_token);
         }
       }
     });
@@ -327,11 +328,11 @@ function App() {
       await supabase.auth.signOut();
     }
     setSession(null);
+    setGoogleToken('');
     setIsDemoSession(false);
     setSelectedProject(null);
     setProjects([]);
     setIssues([]);
-    localStorage.removeItem('google_oauth_provider_token');
   };
 
   // 로딩 화면
@@ -497,6 +498,7 @@ function App() {
               onProjectSelected={(proj) => {
                 setSelectedProject(proj);
               }}
+              googleToken={googleToken}
             />
           </div>
         )}
