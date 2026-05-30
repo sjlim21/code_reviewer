@@ -239,8 +239,9 @@ const handleLogin = async () => {
   });
 
   server.listen(port, () => {
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=github&redirect_to=http://localhost:${port}/callback`;
-    console.log(`\n\x1b[34m[Auth] GitHub OAuth 로그인창을 여는 중...\x1b[0m`);
+    // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
+    console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
     try {
@@ -546,10 +547,19 @@ const handleAnalyze = async (targetPath, projectId) => {
     const file = sourceFiles[idx];
     console.log(`  - 스캔 중 (${idx + 1}/${sourceFiles.length}): ${file.relPath}`);
 
-    const apiKey = GEMINI_API_KEY || '';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
-
+    let url = '';
     const headers = { 'Content-Type': 'application/json' };
+
+    if (googleToken) {
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
+      headers['Authorization'] = `Bearer ${googleToken}`;
+    } else {
+      if (!GEMINI_API_KEY) {
+        console.warn(`    \x1b[31m[Warning] ${file.relPath} 스캔 생략 (구글 인증 토큰 및 VITE_GEMINI_API_KEY 부재)\x1b[0m`);
+        continue;
+      }
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    }
 
     const userPrompt = `File Path: ${file.relPath}
 Content:

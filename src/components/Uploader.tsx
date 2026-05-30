@@ -160,12 +160,16 @@ export const Uploader: React.FC<UploaderProps> = ({
         });
 
         try {
-          // Gemini API 스캔
+          // 로컬 스토리지에서 Google OAuth Access Token 추출
+          const googleToken = localStorage.getItem('google_oauth_provider_token') || '';
+
+          // Gemini API 스캔 (Google OAuth 토큰 전달)
           const detectedIssues = await analyzeCodeWithGemini(
             file.name,
             codeContent,
             activeProjId,
-            runId
+            runId,
+            googleToken
           );
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {
