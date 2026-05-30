@@ -10,6 +10,7 @@ import { Dashboard } from './components/Dashboard';
 import { CodeViewer } from './components/CodeViewer';
 import { Uploader } from './components/Uploader';
 import { Settings } from './components/Settings';
+import { Login } from './components/Login';
 import { 
   LayoutDashboard, 
   UploadCloud, 
@@ -18,7 +19,9 @@ import {
   Eye, 
   GitBranch, 
   ExternalLink,
-  Database
+  Database,
+  LogOut,
+  User
 } from 'lucide-react';
 
 function App() {
@@ -28,15 +31,55 @@ function App() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isUsingRealDB, setIsUsingRealDB] = useState(false);
+  
+  // 인증 및 세션 상태 추가
+  const [session, setSession] = useState<any>(null);
+  const [isDemoSession, setIsDemoSession] = useState(false);
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
 
-  // 1. Supabase에서 실시간 데이터 로드
+  // 1. Supabase Auth 세션 감지 및 초기 로드
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    
+    if (!supabase) {
+      setIsLoadingSession(false);
+      return;
+    }
+
+    // 초기 세션 획득
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      setSession(initialSession);
+      setIsLoadingSession(false);
+    });
+
+    // 인증 상태 변화 리스너 등록
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      setSession(currentSession);
+      if (currentSession) {
+        setIsDemoSession(false); // 구글 인증 성공 시 데모 세션 강제 종료
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // 2. 로그인 완료 후 실시간 DB로부터 데이터 패칭
   useEffect(() => {
     const loadDBData = async () => {
       const supabase = getSupabaseClient();
       
-      if (!supabase) {
+      // 구글 인증도 없고 가상 데모 세션도 없으면 패칭 중단
+      if (!session && !isDemoSession) {
+        setProjects([]);
+        setIssues([]);
+        return;
+      }
+
+      if (!supabase || isDemoSession) {
         // Fallback to Mock Data
-        console.log("Using Mock fallback data.");
+        console.log("Using Mock fallback data (Demo Session).");
         setProjects(mockProjects);
         setIssues(mockIssues);
         setSelectedProject(mockProjects[0]);
@@ -69,14 +112,12 @@ function App() {
           if (issuesError) throw issuesError;
           setIssues(dbIssues as Issue[]);
         } else {
-          // 프로젝트가 하나도 없는 경우 시드 프로젝트 가상 삽입 제안 또는 빈 배열
           setProjects([]);
           setIssues([]);
         }
 
       } catch (err) {
-        console.error("Supabase load error:", err);
-        // Error fallback to Mock
+        console.error("Supabase load error, switching to simulation fallback:", err);
         setProjects(mockProjects);
         setIssues(mockIssues);
         setSelectedProject(mockProjects[0]);
@@ -84,10 +125,12 @@ function App() {
       }
     };
 
-    loadDBData();
-  }, []);
+    if (!isLoadingSession) {
+      loadDBData();
+    }
+  }, [session, isDemoSession, isLoadingSession]);
 
-  // 2. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드
+  // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드
   useEffect(() => {
     const fetchIssuesForProject = async () => {
       if (!selectedProject || !isUsingRealDB) return;
@@ -111,7 +154,7 @@ function App() {
     fetchIssuesForProject();
   }, [selectedProject, isUsingRealDB]);
 
-  // 3. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지)
+  // 4. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지)
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!supabase || !selectedProject || !isUsingRealDB) return;
@@ -121,19 +164,17 @@ function App() {
       .on(
         'postgres_changes',
         {
-          event: '*', // INSERT, UPDATE, DELETE 전체 감지
+          event: '*',
           schema: 'public',
           table: 'issues',
           filter: `project_id=eq.${selectedProject.id}`
         },
         (payload) => {
           console.log('Realtime change detected:', payload);
-          // 실시간으로 이슈 리스트 상태 갱신
           if (payload.eventType === 'INSERT') {
             setIssues(prev => [payload.new as Issue, ...prev].sort((a, b) => b.priority_score - a.priority_score));
           } else if (payload.eventType === 'UPDATE') {
             setIssues(prev => prev.map(issue => issue.id === payload.new.id ? (payload.new as Issue) : issue));
-            // 상세 열려 있는 이슈 업데이트
             setSelectedIssue(current => current && current.id === payload.new.id ? (payload.new as Issue) : current);
           } else if (payload.eventType === 'DELETE') {
             setIssues(prev => prev.filter(issue => issue.id !== payload.old.id));
@@ -147,9 +188,8 @@ function App() {
     };
   }, [selectedProject, isUsingRealDB]);
 
-  // 4. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함)
+  // 5. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함)
   const handleUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
-    // 1단계: 프론트 상태 즉시 반영 (Optimistic UI)
     setIssues(prevIssues => 
       prevIssues.map(issue => 
         issue.id === issueId 
@@ -165,7 +205,6 @@ function App() {
       setSelectedIssue(prev => prev ? { ...prev, status: newStatus } : null);
     }
 
-    // 2단계: 실제 Supabase DB 업데이트 요청
     if (isUsingRealDB) {
       const supabase = getSupabaseClient();
       if (supabase) {
@@ -175,28 +214,52 @@ function App() {
             .update({ 
               status: newStatus,
               resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null,
-              resolved_by: 'usr-1' // Default Admin
+              resolved_by: session?.user?.id || 'usr-1'
             })
             .eq('id', issueId);
           if (error) throw error;
         } catch (e) {
-          console.error("DB update status failed:", e);
+          console.error("DB status update failed:", e);
         }
       }
     }
   };
 
-  // 5. 분석 완료 후 새 이슈 추가 핸들러
+  // 6. 분석 완료 후 새 이슈 추가 핸들러
   const handleAnalysisComplete = (newIssues: Issue[]) => {
-    if (isUsingRealDB) {
-      // Supabase Realtime 구독 채널에서 INSERT 이벤트를 통해 자동으로 갱신될 것임.
-      // 수동 동기화 보강
-      setIssues(prev => [...newIssues, ...prev].sort((a, b) => b.priority_score - a.priority_score));
-    } else {
-      setIssues(prev => [...newIssues, ...prev].sort((a, b) => b.priority_score - a.priority_score));
-    }
+    setIssues(prev => [...newIssues, ...prev].sort((a, b) => b.priority_score - a.priority_score));
     setActiveTab('dashboard');
   };
+
+  // 로그아웃 핸들러
+  const handleLogout = async () => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setSession(null);
+    setIsDemoSession(false);
+    setSelectedProject(null);
+    setProjects([]);
+    setIssues([]);
+  };
+
+  // 로딩 화면
+  if (isLoadingSession) {
+    return (
+      <div className="min-h-screen bg-[#080c14] flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // 7. 인증 가드 분기 (세션 부재 시 로그인 페이지 렌더링)
+  if (!session && !isDemoSession) {
+    return <Login onMockLogin={() => setIsDemoSession(true)} />;
+  }
+
+  const userEmail = session?.user?.email || 'offline-demo@google.com';
+  const userName = session?.user?.user_metadata?.full_name || 'Demo User';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0b0f19] to-[#080b12] text-slate-100 flex flex-col justify-between">
@@ -218,42 +281,62 @@ function App() {
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                activeTab === 'dashboard'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-              }`}
-            >
-              <LayoutDashboard size={14} />
-              대시보드
-            </button>
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                activeTab === 'upload'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-              }`}
-            >
-              <UploadCloud size={14} />
-              코드 분석
-            </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                activeTab === 'settings'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-              }`}
-            >
-              <Sliders size={14} />
-              분석 설정
-            </button>
-          </nav>
+          {/* Navigation Tabs & Session Profile */}
+          <div className="flex items-center gap-6">
+            <nav className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                  activeTab === 'dashboard'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <LayoutDashboard size={14} />
+                대시보드
+              </button>
+              <button
+                onClick={() => setActiveTab('upload')}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                  activeTab === 'upload'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <UploadCloud size={14} />
+                코드 분석
+              </button>
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                  activeTab === 'settings'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Sliders size={14} />
+                분석 설정
+              </button>
+            </nav>
+
+            {/* Profile Info & Logout */}
+            <div className="flex items-center gap-3 pl-4 border-l border-slate-800/80">
+              <div className="text-right hidden sm:block">
+                <div className="text-xs font-semibold text-slate-300">{userName}</div>
+                <div className="text-[10px] text-slate-500 font-mono">{userEmail}</div>
+              </div>
+              <div className="p-2 bg-slate-800/60 rounded-xl text-slate-400 border border-slate-700/50">
+                <User size={14} />
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-2 bg-slate-800/20 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/20 text-slate-400 hover:text-red-400 rounded-xl transition-all"
+                title="로그아웃"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 

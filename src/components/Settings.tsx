@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { STORAGE_KEYS, type Project } from '../supabase';
-import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database } from 'lucide-react';
+import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database, Info } from 'lucide-react';
 
 interface SettingsProps {
   project: Project | null;
 }
 
 export const Settings: React.FC<SettingsProps> = ({ project }) => {
-  // Supabase & Gemini 키 상태 관리
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
-  const [geminiKey, setGeminiKey] = useState('');
 
   const [slackUrl, setSlackUrl] = useState('');
   const [discordUrl, setDiscordUrl] = useState('');
@@ -23,25 +21,20 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
   });
   const [isSaved, setIsSaved] = useState(false);
 
-  // 초기 마운트 시 LocalStorage에서 설정 로드
   useEffect(() => {
     setSupabaseUrl(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
     setSupabaseKey(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
-    setGeminiKey(localStorage.getItem(STORAGE_KEYS.GEMINI_API_KEY) || '');
   }, []);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 로컬 스토리지 저장
     localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, supabaseUrl.trim());
     localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, supabaseKey.trim());
-    localStorage.setItem(STORAGE_KEYS.GEMINI_API_KEY, geminiKey.trim());
 
     setIsSaved(true);
     setTimeout(() => {
       setIsSaved(false);
-      // 저장 후 변경 사항 즉각 갱신을 위해 윈도우 리로드 제안 또는 알림
       window.location.reload();
     }, 1500);
   };
@@ -60,7 +53,7 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
             </h2>
           </div>
 
-          {/* 1. Supabase 연동 설정 */}
+          {/* 1. Supabase Connection */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
               <Database size={14} />
@@ -94,25 +87,20 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
             </p>
           </div>
 
-          {/* 2. Gemini API 연동 설정 */}
-          <div className="space-y-3 pt-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-              <Key size={14} />
-              Google Gemini API 연동 설정
+          {/* 2. Google OAuth & Gemini AI Info Card */}
+          <div className="p-4 bg-indigo-950/20 border border-indigo-500/20 rounded-xl space-y-2.5">
+            <h3 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+              <Key size={14} className="text-indigo-400" />
+              Gemini AI 통합 라이센스 적용
             </h3>
-            <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-slate-400 block">Gemini API Key</label>
-              <input
-                type="password"
-                placeholder="AIzaSy..."
-                value={geminiKey}
-                onChange={e => setGeminiKey(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-            </div>
-            <p className="text-[10px] text-slate-600">
-              * 코드 분석 시 Gemini 2.5 API 모델이 직접 코드 감항 진단을 시작합니다.
+            <p className="text-xs text-indigo-200/80 leading-relaxed">
+              구글 OAuth 로그인이 완료됨에 따라, 시스템 전역에 내장된 고성능 **Gemini 2.5** 모델이 자동으로 활성화되었습니다. 
+              사용자가 개별적으로 API Key를 생성 및 관리할 필요 없이 소셜 인증 세션만으로도 코드 정밀 스캔 기능을 완전 무상으로 사용하실 수 있습니다.
             </p>
+            <div className="flex items-center gap-2 text-[10px] text-indigo-400/80 font-semibold font-mono">
+              <Info size={12} />
+              Google Provider License: Active
+            </div>
           </div>
 
           {/* 3. Ignore paths */}

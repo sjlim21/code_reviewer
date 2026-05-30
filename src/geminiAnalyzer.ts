@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, type Issue } from './supabase';
+import { type Issue } from './supabase';
 
 interface GeminiIssueResponse {
   title: string;
@@ -31,12 +31,10 @@ export const analyzeCodeWithGemini = async (
   projectId: string,
   runId: string
 ): Promise<Issue[]> => {
-  const envKey = import.meta.env.VITE_GEMINI_API_KEY;
-  const localKey = localStorage.getItem(STORAGE_KEYS.GEMINI_API_KEY);
-  const apiKey = envKey || localKey || '';
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
   if (!apiKey) {
-    throw new Error("Gemini API Key가 설정되지 않았습니다. 설정 화면에서 API 키를 입력해 주세요.");
+    throw new Error("시스템 전역 Gemini API Key가 설정되지 않았습니다. 호스트 환경변수(VITE_GEMINI_API_KEY)를 확인해 주세요.");
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
