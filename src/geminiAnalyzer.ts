@@ -1,0 +1,133 @@
+import { STORAGE_KEYS, type Issue } from './supabase';
+
+interface GeminiIssueResponse {
+  title: string;
+  description: string;
+  suggestion: string;
+  rule_id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category: 'security' | 'bug' | 'performance' | 'code_smell' | 'maintainability' | 'style' | 'documentation' | 'dependency' | 'test_coverage' | 'other';
+  line_start: number;
+  line_end: number;
+  code_snippet: string;
+}
+
+// severity별 가중치 priority score 계산기
+const calculatePriorityScore = (severity: string): number => {
+  const base = {
+    critical: 90,
+    high: 70,
+    medium: 40,
+    low: 10,
+    info: 0
+  };
+  const offset = Math.floor(Math.random() * 10); // 미세 다양성 가중
+  return (base[severity as keyof typeof base] || 0) + offset;
+};
+
+export const analyzeCodeWithGemini = async (
+  fileName: string,
+  codeContent: string,
+  projectId: string,
+  runId: string
+): Promise<Issue[]> => {
+  const envKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const localKey = localStorage.getItem(STORAGE_KEYS.GEMINI_API_KEY);
+  const apiKey = envKey || localKey || '';
+
+  if (!apiKey) {
+    throw new Error("Gemini API Key가 설정되지 않았습니다. 설정 화면에서 API 키를 입력해 주세요.");
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+  const systemPrompt = `You are a world-class static code analyzer and AI reviewer.
+Your goal is to inspect the uploaded file and identify critical security vulnerabilities (e.g. SQL Injection, command injection, secret/credential leak), logical bugs, performance bottlenecks, and bad code smells.
+
+For each issue found:
+- Extract the exact lines and code_snippet.
+- Categorize it properly.
+- Rate the severity level (critical, high, medium, low, info).
+- Write a detailed TO-BE suggestions block showing how to refactor this issue.
+
+Response must strictly match the requested JSON schema array.`;
+
+  const userPrompt = `File Name: ${fileName}
+Content:
+\`\`\`
+${codeContent}
+\`\`\``;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{
+          text: `${systemPrompt}\n\n${userPrompt}`
+        }]
+      }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "ARRAY",
+          description: "List of code review issues detected in the source code.",
+          items: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING" },
+              description: { type: "STRING" },
+              suggestion: { type: "STRING" },
+              rule_id: { type: "STRING" },
+              severity: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+              category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "other"] },
+              line_start: { type: "INTEGER" },
+              line_end: { type: "INTEGER" },
+              code_snippet: { type: "STRING" }
+            },
+            required: ["title", "description", "suggestion", "rule_id", "severity", "category", "line_start", "line_end", "code_snippet"]
+          }
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API Error: ${response.statusText} (${response.status}) - ${errText}`);
+  }
+
+  const resJson = await response.json();
+  const rawText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+  
+  if (!rawText) {
+    return [];
+  }
+
+  const parsedIssues: GeminiIssueResponse[] = JSON.parse(rawText);
+
+  // Gemini 응답 구조를 Supabase용 Issue 타입으로 매핑
+  return parsedIssues.map((issue, idx) => ({
+    id: `iss-gemini-${Date.now()}-${idx}`,
+    project_id: projectId,
+    analysis_run_id: runId,
+    title: issue.title,
+    description: issue.description,
+    suggestion: issue.suggestion,
+    rule_id: issue.rule_id,
+    severity: issue.severity,
+    category: issue.category === 'other' ? 'other' : issue.category,
+    priority_score: calculatePriorityScore(issue.severity),
+    file_path: fileName,
+    line_start: issue.line_start,
+    line_end: issue.line_end,
+    code_snippet: issue.code_snippet,
+    status: 'open',
+    assignee_id: null,
+    resolved_by: null,
+    resolved_at: null,
+    created_at: new Date().toISOString()
+  }));
+};

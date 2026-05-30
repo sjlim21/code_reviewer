@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  mockProjects, 
   type Issue, 
   type Project 
 } from '../supabase';
@@ -34,13 +33,15 @@ interface DashboardProps {
   onSelectProject: (project: Project) => void;
   onSelectIssue: (issue: Issue) => void;
   issues: Issue[];
+  projects: Project[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   selectedProject,
   onSelectProject,
   onSelectIssue,
-  issues
+  issues,
+  projects
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -130,7 +131,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </h2>
             
             <div className="space-y-3">
-              {mockProjects.map(proj => {
+              {projects.map(proj => {
                 const isActive = selectedProject?.id === proj.id;
                 return (
                   <button
