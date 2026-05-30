@@ -30,27 +30,19 @@ export const analyzeCodeWithGemini = async (
   fileName: string,
   codeContent: string,
   projectId: string,
-  runId: string,
-  providerToken?: string
+  runId: string
 ): Promise<Issue[]> => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
-  if (!apiKey && !providerToken) {
-    throw new Error("분석을 실행하기 위한 시스템 Gemini API Key 또는 Google OAuth 로그인 세션이 부재합니다. 구글 로그인을 확인해 주세요.");
+  if (!apiKey) {
+    throw new Error("분석을 실행하기 위한 시스템 Gemini API Key(VITE_GEMINI_API_KEY)가 부재합니다. 환경변수를 확인해 주세요.");
   }
 
-  // Google OAuth Access Token이 있다면 Bearer 헤더를 사용하고, 없다면 전역 API Key 파라미터를 사용합니다.
-  const url = providerToken
-    ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
-    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-
-  if (providerToken) {
-    headers['Authorization'] = `Bearer ${providerToken}`;
-  }
 
   const systemPrompt = agentPrompt;
 

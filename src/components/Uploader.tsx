@@ -139,7 +139,6 @@ export const Uploader: React.FC<UploaderProps> = ({
       }
 
       setUploadStatus('analyzing');
-      const googleToken = localStorage.getItem('google_oauth_provider_token') || session?.provider_token || undefined;
       const allDetectedIssues: Issue[] = [];
 
       // 5. 각 소스코드 파일 순차 스캔 루프 돌기
@@ -166,8 +165,7 @@ export const Uploader: React.FC<UploaderProps> = ({
             file.name,
             codeContent,
             activeProjId,
-            runId,
-            googleToken
+            runId
           );
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {
