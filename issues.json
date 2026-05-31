@@ -2,7 +2,7 @@
   {
     "title": "Model Name Hallucination / Future Reference",
     "description": "API call targets 'gemini-3.5-flash', which is not a currently available Gemini model. This will cause HTTP 404 or 400 errors in production.",
-    "suggestion": "### AS-IS\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;\n```\n### TO-BE\n```typescript\n// Use gemini-1.5-flash or gemini-2.0-flash-exp for stable current versions\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;\n```",
+    "suggestion": "### AS-IS\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;\n```\n### TO-BE\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;\n```",
     "rule_id": "bug/invalid-model-name",
     "severity": "critical",
     "category": "bug",
@@ -15,7 +15,7 @@
   {
     "title": "Sensitive API Keys in LocalStorage",
     "description": "Supabase keys and Gemini API keys are persisted in plain text in LocalStorage. This makes the application vulnerable to credential theft via Cross-Site Scripting (XSS).",
-    "suggestion": "### AS-IS\n```typescript\nconst localKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY);\n```\n### TO-BE\n```typescript\n// Avoid persisting sensitive keys in LocalStorage.\n// Use HttpOnly cookies or keep keys in memory via state management if they must be dynamic.\n```",
+    "suggestion": "### AS-IS\n```typescript\nconst localKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY);\n```\n### TO-BE\n```typescript\n// Avoid persisting sensitive keys in LocalStorage.\n```",
     "rule_id": "security/plaintext-credential-storage",
     "severity": "critical",
     "category": "security",
@@ -27,8 +27,8 @@
   },
   {
     "title": "Sequential Network Request Bottleneck",
-    "description": "Code analysis is performed sequentially within a loop using 'await'. For projects with many files, this leads to linear scaling of latency and poor user experience.",
-    "suggestion": "### AS-IS\n```typescript\nfor (let i = 0; i < filesToAnalyze.length; i++) {\n  const detectedIssues = await analyzeCodeWithGemini(...);\n  allDetectedIssues.push(...detectedIssues);\n}\n```\n### TO-BE\n```typescript\n// Use Promise.all with a concurrency limit\nconst results = await Promise.all(batch.map(file => analyzeCodeWithGemini(...)));\n```",
+    "description": "Code analysis is performed sequentially within a loop using 'await'.",
+    "suggestion": "### AS-IS\n```typescript\nfor (let i = 0; i < filesToAnalyze.length; i++) {\n  const detectedIssues = await analyzeCodeWithGemini(...);\n}\n```\n### TO-BE\n```typescript\nconst results = await Promise.all(batch.map(file => analyzeCodeWithGemini(...)));\n```",
     "rule_id": "performance/sequential-async-calls",
     "severity": "high",
     "category": "performance",
@@ -36,12 +36,64 @@
     "file_path": "src/components/Uploader.tsx",
     "line_start": 123,
     "line_end": 154,
-    "code_snippet": "for (let i = 0; i < filesToAnalyze.length; i++) {\n  const detectedIssues = await analyzeCodeWithGemini(...);\n  allDetectedIssues.push(...detectedIssues);\n}"
+    "code_snippet": "for (let i = 0; i < filesToAnalyze.length; i++) {"
+  },
+  {
+    "title": "OAuth Scope Too Broad",
+    "description": "Login scope includes 'cloud-platform' which provides excessive privileges. Violates principle of least privilege.",
+    "suggestion": "### AS-IS\n```typescript\nscopes=https://www.googleapis.com/auth/cloud-platform\n```\n### TO-BE\n```typescript\nscopes=https://www.googleapis.com/auth/userinfo.email\n```",
+    "rule_id": "security/excessive-oauth-scope",
+    "severity": "medium",
+    "category": "security",
+    "priority_score": 49,
+    "file_path": "src/components/Login.tsx",
+    "line_start": 37,
+    "line_end": 37,
+    "code_snippet": "scopes=https://www.googleapis.com/auth/cloud-platform"
+  },
+  {
+    "title": "Hardcoded UI Trend Data",
+    "description": "Dashboard trend chart uses a static array instead of mapping real analysis history.",
+    "suggestion": "### AS-IS\n```typescript\nconst chartTrendData = [ { name: '05-24', issues: 5 }, ... ];\n```\n### TO-BE\n```typescript\n// Map analysisRuns from Supabase to trend chart data.\n```",
+    "rule_id": "logic/hardcoded-metrics",
+    "severity": "low",
+    "category": "other",
+    "priority_score": 22,
+    "file_path": "src/components/Dashboard.tsx",
+    "line_start": 101,
+    "line_end": 110,
+    "code_snippet": "const chartTrendData = ["
+  },
+  {
+    "title": "Magic Timeout for Syntax Highlighting",
+    "description": "setTimeout 50ms used for Prism. Potential race condition.",
+    "suggestion": "### AS-IS\n```typescript\nsetTimeout(() => { Prism.highlightAll(); }, 50);\n```\n### TO-BE\n```typescript\nuseEffect(() => { if(codeRef.current) Prism.highlightElement(codeRef.current); }, [issue]);\n```",
+    "rule_id": "logic/magic-timeout",
+    "severity": "low",
+    "category": "other",
+    "priority_score": 23,
+    "file_path": "src/components/CodeViewer.tsx",
+    "line_start": 43,
+    "line_end": 45,
+    "code_snippet": "setTimeout(() => { Prism.highlightAll(); }, 50);"
+  },
+  {
+    "title": "Global State Mutation in Review",
+    "description": "Mutating global mockComments array instead of using local state or backend updates.",
+    "suggestion": "### AS-IS\n```typescript\nconst issueComments = mockComments.filter(...);\n```\n### TO-BE\n```typescript\n// Use Supabase to persist comments and local state for UI updates.\n```",
+    "rule_id": "logic/state-mutation",
+    "severity": "low",
+    "category": "maintainability",
+    "priority_score": 38,
+    "file_path": "src/components/CodeViewer.tsx",
+    "line_start": 57,
+    "line_end": 60,
+    "code_snippet": "const issueComments = mockComments.filter(c => c.issue_id === issue.id);"
   },
   {
     "title": "Non-Atomic Database Operations",
-    "description": "Project creation and analysis run insertion are separate network calls without transactional integrity.",
-    "suggestion": "### AS-IS\n```typescript\nawait supabase.from('projects').insert(...);\nawait supabase.from('analysis_runs').insert(...);\n```\n### TO-BE\n```typescript\n// Use Supabase RPC to wrap updates in a Postgres transaction.\n```",
+    "description": "Separate network calls for project/run/issue insertion.",
+    "suggestion": "### AS-IS\n```typescript\nawait supabase.from('projects').insert(...);\n```\n### TO-BE\n```typescript\n// Use Supabase RPC transaction.\n```",
     "rule_id": "bug/non-atomic-updates",
     "severity": "medium",
     "category": "bug",
@@ -53,7 +105,7 @@
   },
   {
     "title": "Inaccurate Priority Score Formula",
-    "description": "Priority score uses Math.random() instead of weighted scientific formula.",
+    "description": "Uses Math.random() for scoring.",
     "suggestion": "### AS-IS\n```typescript\nconst offset = Math.floor(Math.random() * 10);\n```\n### TO-BE\n```typescript\nconst score = ((severity * 0.6) + (impact * 0.3) + (likelihood * 0.1)) * 10;\n```",
     "rule_id": "logic/incorrect-priority-algorithm",
     "severity": "medium",
@@ -63,5 +115,18 @@
     "line_start": 15,
     "line_end": 24,
     "code_snippet": "const offset = Math.floor(Math.random() * 10);"
+  },
+  {
+    "title": "Credentials in Settings localStorage",
+    "description": "Settings component persists anon key in plain text.",
+    "suggestion": "### AS-IS\n```typescript\nlocalStorage.setItem('code_eye_supabase_anon_key', key);\n```\n### TO-BE\n```typescript\n// Use secure environment variable injection or encrypted storage.\n```",
+    "rule_id": "security/plaintext-storage",
+    "severity": "high",
+    "category": "security",
+    "priority_score": 58,
+    "file_path": "src/components/Settings.tsx",
+    "line_start": 50,
+    "line_end": 55,
+    "code_snippet": "localStorage.setItem('code_eye_supabase_anon_key', key);"
   }
 ]

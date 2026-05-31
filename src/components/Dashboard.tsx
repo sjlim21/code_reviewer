@@ -15,7 +15,8 @@ import {
   Code,
   Flame,
   ArrowUpRight,
-  Trash2
+  Trash2,
+  Clock
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -92,8 +93,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const metrics = useMemo(() => {
     const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0, open: 0, resolved: 0 };
     projectIssues.forEach(issue => {
-      counts[issue.severity]++;
       if (issue.status === 'open' || issue.status === 'in_progress') {
+        counts[issue.severity]++;
         counts.open++;
       } else {
         counts.resolved++;
@@ -432,10 +433,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                     </div>
                     
-                    <div className="text-xs text-slate-500 mt-2 flex items-center gap-2 font-mono">
+                    <div className="text-xs text-slate-500 mt-2 flex flex-wrap items-center gap-2 font-mono">
                       <span className="text-slate-400">{issue.file_path}</span>
                       <span className="text-slate-700">|</span>
                       <span>Lines {issue.line_start}-{issue.line_end}</span>
+                      {issue.created_at && (
+                        <>
+                          <span className="text-slate-700">|</span>
+                          <span className="flex items-center gap-1 text-[11px] text-slate-500 font-sans">
+                            <Clock size={11} className="text-slate-600" />
+                            {new Date(issue.created_at).toLocaleString('ko-KR', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
