@@ -215,6 +215,10 @@ RETURNS BOOLEAN AS $$
     SELECT 1 FROM public.project_members
     WHERE project_id = p_project_id
       AND user_id = auth.uid()
+  ) OR EXISTS (
+    SELECT 1 FROM public.projects
+    WHERE id = p_project_id
+      AND owner_id = auth.uid()
   );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -246,16 +250,15 @@ DROP POLICY IF EXISTS "issues_select" ON public.issues;
 CREATE POLICY "issues_select" ON public.issues FOR SELECT USING (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "issues_insert" ON public.issues;
-CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (TRUE);
+CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "issues_update" ON public.issues;
 CREATE POLICY "issues_update" ON public.issues FOR UPDATE USING (public.is_project_member(project_id));
 
-DROP POLICY IF EXISTS "issues_all_access" ON public.issues;
-CREATE POLICY "issues_all_access" ON public.issues FOR ALL USING (TRUE);
+DROP POLICY IF EXISTS "issues_all_access" ON public.issues; -- 삭제 처리하여 RLS 우회 제거
 
 DROP POLICY IF EXISTS "analysis_runs_insert" ON public.analysis_runs;
-CREATE POLICY "analysis_runs_insert" ON public.analysis_runs FOR INSERT WITH CHECK (TRUE);
+CREATE POLICY "analysis_runs_insert" ON public.analysis_runs FOR INSERT WITH CHECK (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "analysis_runs_select" ON public.analysis_runs;
 CREATE POLICY "analysis_runs_select" ON public.analysis_runs FOR SELECT USING (TRUE);

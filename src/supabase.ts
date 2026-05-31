@@ -7,6 +7,15 @@ export const STORAGE_KEYS = {
   GEMINI_API_KEY: 'code_eye_gemini_api_key'
 };
 
+const deobfuscate = (str: string) => {
+  if (!str) return '';
+  try {
+    return decodeURIComponent(atob(str));
+  } catch {
+    return str;
+  }
+};
+
 let cachedSupabaseClient: SupabaseClient | null = null;
 let cachedUrl = '';
 let cachedKey = '';
@@ -16,8 +25,8 @@ export const getSupabaseClient = (): SupabaseClient | null => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   
-  const localUrl = localStorage.getItem(STORAGE_KEYS.SUPABASE_URL);
-  const localKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY);
+  const localUrl = deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
+  const localKey = deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
 
   const url = envUrl || localUrl || '';
   const key = envKey || localKey || '';

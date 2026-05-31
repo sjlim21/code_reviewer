@@ -7,7 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -184,7 +184,7 @@ const setupVirtualEnv = (targetDir) => {
   if (!fs.existsSync(venvDir)) {
     console.log(`\x1b[34m[Venv] 로컬 가상환경(.venv)이 존재하지 않아 생성 중... (${pythonCmd} -m venv .venv)\x1b[0m`);
     try {
-      execSync(`${pythonCmd} -m venv "${venvDir}"`, { stdio: 'inherit', cwd: targetDir });
+      execFileSync(pythonCmd, ['-m', 'venv', venvDir], { stdio: 'inherit', cwd: targetDir });
     } catch (e) {
       console.error('\x1b[31m[Venv Error] 가상환경 생성 실패:\x1b[0m', e);
       return null;
@@ -194,7 +194,7 @@ const setupVirtualEnv = (targetDir) => {
   if (!fs.existsSync(radonPath) || !fs.existsSync(banditPath)) {
     console.log('\x1b[34m[Venv] 가상환경 내 radon 및 bandit 설치 중... (pip install radon bandit)\x1b[0m');
     try {
-      execSync(`"${pipPath}" install radon bandit`, { stdio: 'inherit', cwd: targetDir });
+      execFileSync(pipPath, ['install', 'radon', 'bandit'], { stdio: 'inherit', cwd: targetDir });
     } catch (e) {
       console.error('\x1b[31m[Venv Error] pip install 패키지 설치 실패:\x1b[0m', e);
       return null;
@@ -209,6 +209,14 @@ const setupVirtualEnv = (targetDir) => {
 // ----------------------------------------------------
 const handleLogin = async () => {
   await ensureSupabaseCredentials();
+
+  // Validate SUPABASE_URL format to prevent Command Injection
+  try {
+    new URL(SUPABASE_URL);
+  } catch (err) {
+    console.error('\x1b[31m[Error] 올바르지 않은 Supabase URL 형식입니다.\x1b[0m');
+    process.exit(1);
+  }
 
   const port = 54321;
   const server = http.createServer((req, res) => {
@@ -277,17 +285,17 @@ const handleLogin = async () => {
   });
 
   server.listen(port, () => {
-    // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/cloud-platform&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
+    // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득 (제한된 scope 사용)
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
     console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
     try {
-      const startCmd = os.platform() === 'win32' ? 'start' : os.platform() === 'darwin' ? 'open' : 'xdg-open';
       if (os.platform() === 'win32') {
-        execSync(`start "" "${oauthUrl}"`);
+        execFileSync('cmd.exe', ['/c', 'start', '', oauthUrl]);
       } else {
-        execSync(`${startCmd} "${oauthUrl}"`);
+        const startCmd = os.platform() === 'darwin' ? 'open' : 'xdg-open';
+        execFileSync(startCmd, [oauthUrl]);
       }
     } catch (e) {
       // 브라우저 팝업 실패 시 수동 접속용 로그 유지
@@ -304,7 +312,7 @@ const runLinterAnalysis = (targetPath, bin) => {
   const banditIssues = [];
 
   try {
-    const radonResRaw = execSync(`"${bin.radonPath}" cc "${targetPath}" -j -x "node_modules,.venv,.git,dist"`, { encoding: 'utf-8' });
+    const radonResRaw = execFileSync(bin.radonPath, ['cc', targetPath, '-j', '-x', 'node_modules,.venv,.git,dist'], { encoding: 'utf-8' });
     const radonJson = JSON.parse(radonResRaw);
     
     Object.keys(radonJson).forEach(filePath => {
@@ -334,7 +342,7 @@ const runLinterAnalysis = (targetPath, bin) => {
   }
 
   try {
-    const banditResRaw = execSync(`"${bin.banditPath}" -r "${targetPath}" -f json -x "node_modules,.venv,.git,dist"`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    const banditResRaw = execFileSync(bin.banditPath, ['-r', targetPath, '-f', 'json', '-x', 'node_modules,.venv,.git,dist'], { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
     const banditJson = JSON.parse(banditResRaw);
     
     if (banditJson.results && Array.isArray(banditJson.results)) {

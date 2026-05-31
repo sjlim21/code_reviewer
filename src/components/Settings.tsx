@@ -21,12 +21,26 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
   });
   const [isSaved, setIsSaved] = useState(false);
 
+  const obfuscate = (str: string) => {
+    if (!str) return '';
+    return btoa(encodeURIComponent(str));
+  };
+
+  const deobfuscate = (str: string) => {
+    if (!str) return '';
+    try {
+      return decodeURIComponent(atob(str));
+    } catch {
+      return str;
+    }
+  };
+
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setSupabaseUrl(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
-    setSupabaseKey(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
-    setSlackUrl(localStorage.getItem('code_eye_slack_webhook_url') || '');
-    setDiscordUrl(localStorage.getItem('code_eye_discord_webhook_url') || '');
+    setSupabaseUrl(deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || ''));
+    setSupabaseKey(deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || ''));
+    setSlackUrl(deobfuscate(localStorage.getItem('code_eye_slack_webhook_url') || ''));
+    setDiscordUrl(deobfuscate(localStorage.getItem('code_eye_discord_webhook_url') || ''));
     setIgnorePaths(localStorage.getItem('code_eye_ignore_paths') || 'node_modules/, dist/, build/, *.min.js');
     
     const savedLinters = localStorage.getItem('code_eye_selected_linters');
@@ -43,10 +57,10 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
-    localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, supabaseUrl.trim());
-    localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, supabaseKey.trim());
-    localStorage.setItem('code_eye_slack_webhook_url', slackUrl.trim());
-    localStorage.setItem('code_eye_discord_webhook_url', discordUrl.trim());
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, obfuscate(supabaseUrl.trim()));
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, obfuscate(supabaseKey.trim()));
+    localStorage.setItem('code_eye_slack_webhook_url', obfuscate(slackUrl.trim()));
+    localStorage.setItem('code_eye_discord_webhook_url', obfuscate(discordUrl.trim()));
     localStorage.setItem('code_eye_ignore_paths', ignorePaths.trim());
     localStorage.setItem('code_eye_selected_linters', JSON.stringify(selectedLinters));
 

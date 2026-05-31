@@ -1,7 +1,59 @@
 [
   {
+    "title": "Command Injection in Login Handler",
+    "description": "The 'handleLogin' function in code-eye.js uses 'execSync' to open URLs without sanitizing the SUPABASE_URL. An attacker could inject arbitrary shell commands via a crafted URL.",
+    "suggestion": "### AS-IS\n```javascript\nexecSync(`start \"\" \"${oauthUrl}\"`);\n```\n### TO-BE\n```javascript\n// Use specialized libraries like 'open' or strictly validate the URL structure.\nif (!/^https:\\/\\/[a-z0-9-]+\\.supabase\\.co/.test(SUPABASE_URL)) throw new Error('Invalid URL');\n```",
+    "rule_id": "security/command-injection-login",
+    "severity": "critical",
+    "category": "security",
+    "priority_score": 100,
+    "file_path": "bin/code-eye.js",
+    "line_start": 188,
+    "line_end": 190,
+    "code_snippet": "execSync(`start \"\" \"${oauthUrl}\"`);"
+  },
+  {
+    "title": "Command Injection in Linter Analysis",
+    "description": "The 'runLinterAnalysis' function passes 'targetPath' directly to a shell command via 'execSync'. If a folder name contains special characters like ';', it can execute arbitrary code.",
+    "suggestion": "### AS-IS\n```javascript\nexecSync(`\"${bin.radonPath}\" cc \"${targetPath}\" ...`);\n```\n### TO-BE\n```javascript\n// Use execFile or spawn with argument arrays to avoid shell parsing.\nspawn(bin.radonPath, ['cc', targetPath, '-j'], { shell: false });\n```",
+    "rule_id": "security/command-injection-linter",
+    "severity": "critical",
+    "category": "security",
+    "priority_score": 100,
+    "file_path": "bin/code-eye.js",
+    "line_start": 351,
+    "line_end": 355,
+    "code_snippet": "execSync(`\"${bin.radonPath}\" cc \"${targetPath}\" -j -x \"node_modules,.venv,.git,dist\"`)"
+  },
+  {
+    "title": "Complete RLS Bypass (ALL permissions)",
+    "description": "The 'issues_all_access' policy in setup.sql grants 'ALL' permissions to anyone (USING TRUE). This effectively disables security for the issues table.",
+    "suggestion": "### AS-IS\n```sql\nCREATE POLICY \"issues_all_access\" ON public.issues FOR ALL USING (TRUE);\n```\n### TO-BE\n```sql\nDROP POLICY \"issues_all_access\" ON public.issues;\n-- Implement proper membership checks for each operation (SELECT, INSERT, UPDATE).\n```",
+    "rule_id": "security/rls-bypass-all",
+    "severity": "critical",
+    "category": "security",
+    "priority_score": 98,
+    "file_path": "setup.sql",
+    "line_start": 248,
+    "line_end": 250,
+    "code_snippet": "CREATE POLICY \"issues_all_access\" ON public.issues FOR ALL USING (TRUE);"
+  },
+  {
+    "title": "Unrestricted Analysis Run Insertion",
+    "description": "Anyone can insert analysis runs into any project because the policy lacks a membership check.",
+    "suggestion": "### AS-IS\n```sql\nCREATE POLICY \"analysis_runs_insert\" ON public.analysis_runs FOR INSERT WITH CHECK (TRUE);\n```\n### TO-BE\n```sql\nCREATE POLICY \"analysis_runs_insert\" ON public.analysis_runs \nFOR INSERT WITH CHECK (public.is_project_member(project_id));\n```",
+    "rule_id": "security/unrestricted-insert-runs",
+    "severity": "high",
+    "category": "security",
+    "priority_score": 82,
+    "file_path": "setup.sql",
+    "line_start": 251,
+    "line_end": 253,
+    "code_snippet": "CREATE POLICY \"analysis_runs_insert\" ON public.analysis_runs FOR INSERT WITH CHECK (TRUE);"
+  },
+  {
     "title": "Model Name Hallucination / Future Reference",
-    "description": "API call targets 'gemini-3.5-flash', which is not a currently available Gemini model. This will cause HTTP 404 or 400 errors in production.",
+    "description": "API call targets 'gemini-3.5-flash', which is not a currently available Gemini model.",
     "suggestion": "### AS-IS\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;\n```\n### TO-BE\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;\n```",
     "rule_id": "bug/invalid-model-name",
     "severity": "critical",
@@ -14,7 +66,7 @@
   },
   {
     "title": "Sensitive API Keys in LocalStorage",
-    "description": "Supabase keys and Gemini API keys are persisted in plain text in LocalStorage. This makes the application vulnerable to credential theft via Cross-Site Scripting (XSS).",
+    "description": "Supabase keys and Gemini API keys are persisted in plain text in LocalStorage.",
     "suggestion": "### AS-IS\n```typescript\nconst localKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY);\n```\n### TO-BE\n```typescript\n// Avoid persisting sensitive keys in LocalStorage.\n```",
     "rule_id": "security/plaintext-credential-storage",
     "severity": "critical",
@@ -24,6 +76,19 @@
     "line_start": 4,
     "line_end": 21,
     "code_snippet": "export const STORAGE_KEYS = {\n  SUPABASE_URL: 'code_eye_supabase_url',\n  SUPABASE_ANON_KEY: 'code_eye_supabase_anon_key',\n  GEMINI_API_KEY: 'code_eye_gemini_api_key'\n};"
+  },
+  {
+    "title": "Prompt Injection Risk",
+    "description": "Unsanitized code content is concatenated into the Gemini prompt. A malicious file could hijack the analysis instructions.",
+    "suggestion": "### AS-IS\n```typescript\nconst userPrompt = `File Name: ${fileName}\\nContent:\\n\\`\\`\\`\\n${codeContent}\\n\\`\\`\\`\\`;\n```\n### TO-BE\n```typescript\n// Use system instructions separately and enforce strict JSON output.\n// Sanitize or delimit code content to prevent escape sequences.\n```",
+    "rule_id": "security/prompt-injection",
+    "severity": "high",
+    "category": "security",
+    "priority_score": 75,
+    "file_path": "src/geminiAnalyzer.ts",
+    "line_start": 96,
+    "line_end": 100,
+    "code_snippet": "const userPrompt = `File Name: ${fileName}\\nContent:\\n\\`\\`\\`\\n${codeContent}\\n\\`\\`\\`\\`;"
   },
   {
     "title": "Sequential Network Request Bottleneck",
@@ -39,58 +104,6 @@
     "code_snippet": "for (let i = 0; i < filesToAnalyze.length; i++) {"
   },
   {
-    "title": "OAuth Scope Too Broad",
-    "description": "Login scope includes 'cloud-platform' which provides excessive privileges. Violates principle of least privilege.",
-    "suggestion": "### AS-IS\n```typescript\nscopes=https://www.googleapis.com/auth/cloud-platform\n```\n### TO-BE\n```typescript\nscopes=https://www.googleapis.com/auth/userinfo.email\n```",
-    "rule_id": "security/excessive-oauth-scope",
-    "severity": "medium",
-    "category": "security",
-    "priority_score": 49,
-    "file_path": "src/components/Login.tsx",
-    "line_start": 37,
-    "line_end": 37,
-    "code_snippet": "scopes=https://www.googleapis.com/auth/cloud-platform"
-  },
-  {
-    "title": "Hardcoded UI Trend Data",
-    "description": "Dashboard trend chart uses a static array instead of mapping real analysis history.",
-    "suggestion": "### AS-IS\n```typescript\nconst chartTrendData = [ { name: '05-24', issues: 5 }, ... ];\n```\n### TO-BE\n```typescript\n// Map analysisRuns from Supabase to trend chart data.\n```",
-    "rule_id": "logic/hardcoded-metrics",
-    "severity": "low",
-    "category": "other",
-    "priority_score": 22,
-    "file_path": "src/components/Dashboard.tsx",
-    "line_start": 101,
-    "line_end": 110,
-    "code_snippet": "const chartTrendData = ["
-  },
-  {
-    "title": "Magic Timeout for Syntax Highlighting",
-    "description": "setTimeout 50ms used for Prism. Potential race condition.",
-    "suggestion": "### AS-IS\n```typescript\nsetTimeout(() => { Prism.highlightAll(); }, 50);\n```\n### TO-BE\n```typescript\nuseEffect(() => { if(codeRef.current) Prism.highlightElement(codeRef.current); }, [issue]);\n```",
-    "rule_id": "logic/magic-timeout",
-    "severity": "low",
-    "category": "other",
-    "priority_score": 23,
-    "file_path": "src/components/CodeViewer.tsx",
-    "line_start": 43,
-    "line_end": 45,
-    "code_snippet": "setTimeout(() => { Prism.highlightAll(); }, 50);"
-  },
-  {
-    "title": "Global State Mutation in Review",
-    "description": "Mutating global mockComments array instead of using local state or backend updates.",
-    "suggestion": "### AS-IS\n```typescript\nconst issueComments = mockComments.filter(...);\n```\n### TO-BE\n```typescript\n// Use Supabase to persist comments and local state for UI updates.\n```",
-    "rule_id": "logic/state-mutation",
-    "severity": "low",
-    "category": "maintainability",
-    "priority_score": 38,
-    "file_path": "src/components/CodeViewer.tsx",
-    "line_start": 57,
-    "line_end": 60,
-    "code_snippet": "const issueComments = mockComments.filter(c => c.issue_id === issue.id);"
-  },
-  {
     "title": "Non-Atomic Database Operations",
     "description": "Separate network calls for project/run/issue insertion.",
     "suggestion": "### AS-IS\n```typescript\nawait supabase.from('projects').insert(...);\n```\n### TO-BE\n```typescript\n// Use Supabase RPC transaction.\n```",
@@ -104,29 +117,16 @@
     "code_snippet": "const { error: insertProjError } = await supabase.from('projects').insert(newProj);"
   },
   {
-    "title": "Inaccurate Priority Score Formula",
-    "description": "Uses Math.random() for scoring.",
-    "suggestion": "### AS-IS\n```typescript\nconst offset = Math.floor(Math.random() * 10);\n```\n### TO-BE\n```typescript\nconst score = ((severity * 0.6) + (impact * 0.3) + (likelihood * 0.1)) * 10;\n```",
-    "rule_id": "logic/incorrect-priority-algorithm",
+    "title": "OAuth Scope Too Broad",
+    "description": "Login scope includes 'cloud-platform' providing excessive privileges.",
+    "suggestion": "### AS-IS\n```typescript\nscopes=https://www.googleapis.com/auth/cloud-platform\n```\n### TO-BE\n```typescript\nscopes=https://www.googleapis.com/auth/userinfo.email\n```",
+    "rule_id": "security/excessive-oauth-scope",
     "severity": "medium",
-    "category": "performance",
-    "priority_score": 40,
-    "file_path": "src/geminiAnalyzer.ts",
-    "line_start": 15,
-    "line_end": 24,
-    "code_snippet": "const offset = Math.floor(Math.random() * 10);"
-  },
-  {
-    "title": "Credentials in Settings localStorage",
-    "description": "Settings component persists anon key in plain text.",
-    "suggestion": "### AS-IS\n```typescript\nlocalStorage.setItem('code_eye_supabase_anon_key', key);\n```\n### TO-BE\n```typescript\n// Use secure environment variable injection or encrypted storage.\n```",
-    "rule_id": "security/plaintext-storage",
-    "severity": "high",
     "category": "security",
-    "priority_score": 58,
-    "file_path": "src/components/Settings.tsx",
-    "line_start": 50,
-    "line_end": 55,
-    "code_snippet": "localStorage.setItem('code_eye_supabase_anon_key', key);"
+    "priority_score": 49,
+    "file_path": "src/components/Login.tsx",
+    "line_start": 37,
+    "line_end": 37,
+    "code_snippet": "scopes=https://www.googleapis.com/auth/cloud-platform"
   }
 ]

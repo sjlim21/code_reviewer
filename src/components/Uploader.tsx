@@ -76,6 +76,7 @@ export const Uploader: React.FC<UploaderProps> = ({
         throw new Error("분석을 수행하려면 로그인 세션이 필요합니다.");
       }
       let activeProjId = selectedProject?.id || '';
+      let isNewProjectCreated = false;
 
       // 3. 폴더명 기반 프로젝트 자동 매핑 / 생성
       setProgress(15);
@@ -110,6 +111,7 @@ export const Uploader: React.FC<UploaderProps> = ({
         if (insertProjError) throw insertProjError;
 
         activeProjId = newProjId;
+        isNewProjectCreated = true;
         if (onProjectCreated) onProjectCreated(newProj);
         console.log(`Created new project: ${folderName}`);
       } else {
@@ -146,7 +148,13 @@ export const Uploader: React.FC<UploaderProps> = ({
             total_files: filesToAnalyze.length,
             file_storage_path: `code-uploads/${activeProjId}/${runId}/${folderName}`
           });
-        if (runError) throw runError;
+        if (runError) {
+          if (isNewProjectCreated) {
+            console.warn(`Deleting project ${activeProjId} due to analysis run creation failure.`);
+            await supabase.from('projects').delete().eq('id', activeProjId);
+          }
+          throw runError;
+        }
       }
 
       setUploadStatus('analyzing');
