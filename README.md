@@ -14,11 +14,16 @@
 
 ## 🛠️ 1단계: Supabase 데이터베이스 구축 및 설정
 
-### 1. SQL 스키마 초기화
-1. [Supabase Dashboard](https://supabase.com/dashboard)에 로그인하고 새 프로젝트를 생성합니다.
-2. 생성된 프로젝트의 **SQL Editor**로 이동합니다.
-3. 프로젝트 루트에 있는 [setup.sql](file:///d:/01_project/3_test_viewer/setup.sql) 파일의 쿼리 전체를 복사하여 SQL Editor에 붙여넣고 **[Run]** 버튼을 실행합니다.
-   - 이 쿼리는 필요한 테이블(`projects`, `issues`, `analysis_runs` 등), 인덱스, RLS 보안 정책 및 사용자 트리거를 생성합니다.
+### 1. SQL 스키마 초기화 (자동화 권장)
+로컬에 패키지 설치(`npm install`) 및 2단계 환경 변수(`.env`) 세팅이 완료되었다면 아래 명령을 실행하여 Supabase DB 스키마(테이블, RLS 정책, 트리거, 시드 데이터)를 **원클릭으로 자동 초기화**할 수 있습니다.
+```bash
+npm run init-db
+```
+- 실행 과정에서 Supabase DB 비밀번호(프로젝트 생성 시 입력한 비밀번호)를 요청합니다.
+
+> [!NOTE]
+> 만약 Supabase 대시보드에서 수동으로 설치하고 싶다면, 생성된 프로젝트의 **SQL Editor**로 이동한 뒤 루트 폴더의 [setup.sql](file:///d:/01_project/3_test_viewer/setup.sql) 파일 내용을 복사하여 붙여넣고 **[Run]**을 눌러 실행하셔도 됩니다.
+
 
 ### 2. URL 인증 리다이렉트 설정 (중요!)
 로컬 CLI 환경에서 구글 OAuth 소셜 로그인이 정상적으로 브라우저 및 터미널과 토큰을 연동하도록 Supabase 화이트리스트 주소를 추가해야 합니다.

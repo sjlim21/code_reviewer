@@ -159,6 +159,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
@@ -172,15 +173,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS set_updated_at ON public.profiles;
 CREATE OR REPLACE TRIGGER set_updated_at BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS set_updated_at ON public.projects;
 CREATE OR REPLACE TRIGGER set_updated_at BEFORE UPDATE ON public.projects
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS set_updated_at ON public.issues;
 CREATE OR REPLACE TRIGGER set_updated_at BEFORE UPDATE ON public.issues
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS set_updated_at ON public.issue_comments;
 CREATE OR REPLACE TRIGGER set_updated_at BEFORE UPDATE ON public.issue_comments
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
@@ -219,18 +224,34 @@ RETURNS TEXT AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- RLS 정책 생성
+DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
 CREATE POLICY "profiles_select" ON public.profiles FOR SELECT USING (TRUE);
+
+DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 CREATE POLICY "profiles_update_own" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "projects_select_member" ON public.projects;
 CREATE POLICY "projects_select_member" ON public.projects FOR SELECT USING (owner_id = auth.uid() OR public.is_project_member(id));
+
+DROP POLICY IF EXISTS "projects_insert" ON public.projects;
 CREATE POLICY "projects_insert" ON public.projects FOR INSERT WITH CHECK (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "projects_update_owner" ON public.projects;
 CREATE POLICY "projects_update_owner" ON public.projects FOR UPDATE USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "projects_delete_owner" ON public.projects;
 CREATE POLICY "projects_delete_owner" ON public.projects FOR DELETE USING (owner_id = auth.uid());
 
+DROP POLICY IF EXISTS "issues_select" ON public.issues;
 CREATE POLICY "issues_select" ON public.issues FOR SELECT USING (public.is_project_member(project_id));
+
+DROP POLICY IF EXISTS "issues_insert" ON public.issues;
 CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (public.is_project_member(project_id));
+
+DROP POLICY IF EXISTS "issues_update" ON public.issues;
 CREATE POLICY "issues_update" ON public.issues FOR UPDATE USING (public.is_project_member(project_id));
 
+DROP POLICY IF EXISTS "notifications_own" ON public.notifications;
 CREATE POLICY "notifications_own" ON public.notifications FOR ALL USING (user_id = auth.uid());
 
 -- 14. Seed 데이터
@@ -241,6 +262,10 @@ CREATE TABLE IF NOT EXISTS public.severity_rules (
   default_severity severity_level NOT NULL,
   base_score  SMALLINT NOT NULL
 );
+
+-- unique constraint를 안전하게 보장
+ALTER TABLE public.severity_rules DROP CONSTRAINT IF EXISTS unique_category_rule;
+ALTER TABLE public.severity_rules ADD CONSTRAINT unique_category_rule UNIQUE (category, rule_id);
 
 INSERT INTO public.severity_rules (category, rule_id, default_severity, base_score) VALUES
   ('security',        'sql-injection',      'critical', 95),
@@ -255,4 +280,7 @@ INSERT INTO public.severity_rules (category, rule_id, default_severity, base_sco
   ('maintainability', 'complex-function',   'medium',   42),
   ('style',           'naming-convention',  'low',      15),
   ('documentation',   'missing-docstring',  'info',     5)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (category, rule_id) DO UPDATE SET
+  default_severity = EXCLUDED.default_severity,
+  base_score = EXCLUDED.base_score;
+

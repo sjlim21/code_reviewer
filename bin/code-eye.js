@@ -570,18 +570,23 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
     } else {
       console.log('\x1b[33m- 파이썬 정적 툴 미감지로 인해 Linter 단계 생략 (Fallback AI 단독 모드로 이행)\x1b[0m\n');
     }
-  } else {
-    console.log('\x1b[33m- 파이썬(*.py) 소스코드가 없어 Linter 단계를 생략합니다. (AI 단독 스캔 진행)\x1b[0m\n');
   }
 
-  console.log(`\x1b[33m- [CODE EYE] 사용자의 요청에 따라 Gemini AI 스캔을 수행하지 않습니다. (로컬 Linter 검사만 반영)\x1b[0m\n`);
+  console.log(`\x1b[33m- [CODE EYE] 하이브리드 모드: 내부 AI 스캔을 생략합니다. (외부 분석 결과를 'import' 명령어로 업로드하세요.)\x1b[0m\n`);
   const aiIssues = [];
 
   console.log('\n\x1b[34m[Deduplicate] Linter 결과와 AI 진단 결과의 지능형 중복 제거 수행 중...\x1b[0m');
   const finalIssues = deduplicateIssues(aiIssues, linterIssues);
   console.log(`\x1b[32m- 취합 완료 (최종 리포트 등록 이슈 수: ${finalIssues.length}개)\x1b[0m\n`);
 
-  console.log('\x1b[34m[Database] 3단계: Supabase 클라우드 데이터 적재 시작...\x1b[0m');
+  await uploadIssuesToSupabase(activeProjectId, ownerId, sourceFiles, finalIssues, dbHeaders);
+};
+
+// ----------------------------------------------------
+// 9. DB 적재 공유 로직
+// ----------------------------------------------------
+const uploadIssuesToSupabase = async (activeProjectId, ownerId, sourceFiles, finalIssues, dbHeaders) => {
+  console.log('\x1b[34m[Database] Supabase 클라우드 데이터 적재 시작...\x1b[0m');
   try {
     const runId = crypto.randomUUID();
     const runInsertRes = await fetch(`${SUPABASE_URL}/rest/v1/analysis_runs`, {
@@ -620,7 +625,7 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
         rule_id: issue.rule_id,
         severity: issue.severity,
         category: issue.category,
-        priority_score: issue.priority_score,
+        priority_score: issue.priority_score || (issue.severity === 'critical' ? 95 : 50),
         file_path: issue.file_path,
         line_start: issue.line_start,
         line_end: issue.line_end,
@@ -656,8 +661,7 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
 
     console.log('\n\x1b[32m🎉 [Success] 모든 정밀 분석 결과가 Supabase에 다이렉트로 적재 완료되었습니다!');
     console.log(`  - 프로젝트 ID: ${activeProjectId}`);
-    console.log(`  - 스캔 성공 파일수: ${sourceFiles.length}개`);
-    console.log(`  - 등록된 고유 결함수: ${finalIssues.length}개\x1b[0m\n`);
+    console.log(`  - 분석 이슈 수: ${finalIssues.length}개\x1b[0m\n`);
 
   } catch (err) {
     console.error('\x1b[31m[Database Error] Supabase DB 적재 실패:\x1b[0m', err.message);
@@ -665,43 +669,67 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
 };
 
 // ----------------------------------------------------
-// 10. CLI 메인 라우팅 핸들러
+// 10. 외부 결과 임포트 핸들러 (Import)
+// ----------------------------------------------------
+const handleImport = async (jsonFilePath, projectId) => {
+  if (!fs.existsSync(jsonFilePath)) {
+    console.error(`\x1b[31m[Error] JSON 파일을 찾을 수 없습니다: ${jsonFilePath}\x1b[0m`);
+    process.exit(1);
+  }
+
+  await ensureSupabaseCredentials();
+  const config = loadSessionConfig();
+  const supabaseToken = config.supabase_access_token || '';
+
+  if (!supabaseToken) {
+    console.error('\x1b[31m[Error] 로그인 세션이 부재합니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
+    process.exit(1);
+  }
+
+  let ownerId = 'usr-1';
+  try {
+    const payloadBase64 = supabaseToken.split('.')[1];
+    const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+    ownerId = decoded.sub || ownerId;
+  } catch (e) {}
+
+  const dbHeaders = {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${supabaseToken}`,
+    'Prefer': 'return=representation'
+  };
+
+  const importedIssues = JSON.parse(fs.readFileSync(jsonFilePath, 'utf-8'));
+  console.log(`\x1b[34m[Import] 외부 분석 결과 '${jsonFilePath}' 로드 완료. (이슈: ${importedIssues.length}개)\x1b[0m`);
+
+  // 가상의 sourceFiles 정보 (적재 로직 호환용)
+  const sourceFiles = Array.from(new Set(importedIssues.map(i => i.file_path))).map(path => ({ relPath: path }));
+
+  await uploadIssuesToSupabase(projectId, ownerId, sourceFiles, importedIssues, dbHeaders);
+};
+
+// ----------------------------------------------------
+// 11. CLI 메인 라우팅 핸들러
 // ----------------------------------------------------
 const main = () => {
   const args = process.argv.slice(2);
   const command = args[0];
 
-  if (!command) {
-    printHelp();
-    process.exit(0);
-  }
-
   if (command === 'login') {
     handleLogin();
   } else if (command === 'analyze') {
     const targetPath = args[1];
-    let projectId = '';
-    let gcpProjectId = '';
-
-    const projIdx = args.indexOf('--project');
-    if (projIdx !== -1 && args[projIdx + 1]) {
-      projectId = args[projIdx + 1];
-    } else if (args[2] && args[2] !== '--project' && args[2] !== '--gcp-project') {
-      projectId = args[2];
-    }
-
-    const gcpIdx = args.indexOf('--gcp-project');
-    if (gcpIdx !== -1 && args[gcpIdx + 1]) {
-      gcpProjectId = args[gcpIdx + 1];
-    }
-
-    if (!targetPath) {
-      console.error('\x1b[31m[Error] 분석할 대상 경로가 명시되지 않았습니다.\x1b[0m');
-      console.log('예: node bin/code-eye.js analyze ./src [--project PROJECT_ID] [--gcp-project GCP_ID]');
+    const projectId = args[2];
+    handleAnalyze(targetPath, projectId);
+  } else if (command === 'import') {
+    const jsonPath = args[1];
+    const projectId = args[2];
+    if (!jsonPath || !projectId) {
+      console.log('사용법: node bin/code-eye.js import <issues.json> <project_id>');
       process.exit(1);
     }
-
-    handleAnalyze(targetPath, projectId, gcpProjectId);
+    handleImport(jsonPath, projectId);
   } else {
     printHelp();
   }
@@ -709,18 +737,17 @@ const main = () => {
 
 const printHelp = () => {
   console.log(`
-\x1b[36mCODE EYE - AI & Linter Hybrid CLI Agent\x1b[0m
+\x1b[36mCODE EYE - Hybrid CLI Agent\x1b[0m
 사용법:
   \x1b[1mnode bin/code-eye.js [명령어] [매개변수]\x1b[0m
 
 명령어:
-  \x1b[32mlogin\x1b[0m                     Google 소셜 로그인을 실행하고 로컬 인증 토큰을 저장합니다.
-  \x1b[32manalyze <path> [--project <id>]\x1b[0m 로컬 파이썬 Linter 복합 분석을 돌린 뒤 결과를 Supabase에 업로드합니다.
+  \x1b[32mlogin\x1b[0m                     로그인 및 토큰 저장
+  \x1b[32manalyze <path> <project_id>\x1b[0m Linter 스캔 전용 (AI 스캔 생략)
+  \x1b[32mimport <file> <project_id>\x1b[0m 외부 AI 분석 결과(JSON)를 Supabase에 업로드
 
 예시:
-  $ node bin/code-eye.js login
-  $ node bin/code-eye.js analyze ./src
-  $ node bin/code-eye.js analyze ./src --project prj-12345
+  $ node bin/code-eye.js import ./my_issues.json fe6e962c-24cd-4d87-a682-d3f2df994918
 `);
 };
 
