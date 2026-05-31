@@ -277,7 +277,7 @@ const handleLogin = async () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
 
-        console.log('\n\x1b[32m[Success] 구글 OAuth 토큰 세션이 ~/.code-eye-config.json 에 정상 기록되었습니다!\x1b[0m');
+        console.log('\n\x1b[32m[Success] 깃허브 OAuth 토큰 세션이 ~/.code-eye-config.json 에 정상 기록되었습니다!\x1b[0m');
         server.close(() => {
           process.exit(0);
         });
@@ -313,9 +313,9 @@ const handleLogin = async () => {
   });
 
   server.listen(port, () => {
-    // google provider 및 scopes 지정하여 Gemini API 호출 권한 획득 (제한된 scope 사용)
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&scopes=https://www.googleapis.com/auth/generative-language&redirect_to=http://localhost:${port}/callback&options_query_params=access_type%3Doffline%26prompt%3Dconsent`;
-    console.log(`\n\x1b[34m[Auth] Google OAuth 로그인창을 여는 중...\x1b[0m`);
+    // github provider 지정하여 Supabase 인증 획득
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=github&redirect_to=http://localhost:${port}/callback`;
+    console.log(`\n\x1b[34m[Auth] GitHub OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
     try {

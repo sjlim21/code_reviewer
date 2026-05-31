@@ -19,7 +19,7 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
     };
   }, []);
 
-  const handleGoogleLogin = async () => {
+  const handleGithubLogin = async () => {
     setIsLoading(true);
     setErrorMsg('');
     
@@ -36,20 +36,15 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
 
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
+        provider: 'github',
         options: {
-          redirectTo: window.location.origin,
-          scopes: 'https://www.googleapis.com/auth/generative-language',
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent'
-          }
+          redirectTo: window.location.origin
         }
       });
       if (error) throw error;
     } catch (err) {
       console.error("OAuth login request failed:", err);
-      const message = err instanceof Error ? err.message : 'Google 로그인 요청 중 오류가 발생했습니다.';
+      const message = err instanceof Error ? err.message : 'GitHub 로그인 요청 중 오류가 발생했습니다.';
       setErrorMsg(message);
       setIsLoading(false);
     }
@@ -83,9 +78,9 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
 
         {/* Text descriptions */}
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-slate-200">Google 계정 인증 필요</h2>
+          <h2 className="text-sm font-semibold text-slate-200">GitHub 계정 인증 필요</h2>
           <p className="text-xs text-slate-400 leading-relaxed px-4">
-            이 도구는 인증받은 Google 계정 사용자 전용입니다.<br />
+            이 도구는 인증받은 GitHub 계정 사용자 전용입니다.<br />
             보안과 코드 진단 DB 접근 제어를 위해 로그인이 필수입니다.
           </p>
         </div>
@@ -97,21 +92,21 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
           </div>
         )}
 
-        {/* Google sign-in button */}
+        {/* GitHub sign-in button */}
         <button
-          onClick={handleGoogleLogin}
+          onClick={handleGithubLogin}
           disabled={isLoading}
-          className="w-full bg-[#4285f4] hover:bg-[#357ae8] text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-3 transition-all duration-300 shadow-lg active:scale-[0.98]"
+          className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-3 transition-all duration-300 shadow-lg active:scale-[0.98] border border-slate-800"
         >
           {isLoading ? (
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
             <>
-              {/* Inline SVG Google Logo */}
-              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.555 0-6.444-2.889-6.444-6.444s2.889-6.444 6.444-6.444c1.614 0 3.09.594 4.237 1.579l3.023-3.023C19.167 2.057 15.938 1 12.24 1 6.033 1 12.24s5.033 11.24 11.24 11.24c5.895 0 10.865-4.047 11.72-9.6H12.24z" />
+              {/* Inline SVG GitHub Logo */}
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
               </svg>
-              <span>Google 계정으로 시작하기</span>
+              <span>GitHub 계정으로 시작하기</span>
             </>
           )}
         </button>
