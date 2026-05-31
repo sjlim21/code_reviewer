@@ -219,6 +219,8 @@ const handleLogin = async () => {
   }
 
   const port = 54321;
+  let timeoutId;
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url || '', `http://localhost:${port}`);
     const pathname = parsedUrl.pathname;
@@ -259,6 +261,8 @@ const handleLogin = async () => {
       const providerToken = parsedUrl.searchParams.get('provider_token') || '';
 
       if (accessToken) {
+        if (timeoutId) clearTimeout(timeoutId);
+
         const currentConfig = loadSessionConfig();
         fs.writeFileSync(CONFIG_PATH, JSON.stringify({
           ...currentConfig,
@@ -282,6 +286,27 @@ const handleLogin = async () => {
       res.writeHead(404);
       res.end();
     }
+  });
+
+  // Timeout to prevent zombie processes (5 minutes)
+  timeoutId = setTimeout(() => {
+    console.log('\n\x1b[33m[Timeout] 5분 동안 로그인이 완료되지 않아 로그인 대기 서버를 종료합니다.\x1b[0m');
+    server.close(() => {
+      process.exit(1);
+    });
+  }, 5 * 60 * 1000);
+
+  server.on('error', (err) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n\x1b[31m[Error] 포트 ${port}이 이미 사용 중입니다. 기존에 실행된 'code-eye.js login' 프로세스가 존재하거나 해당 포트를 다른 프로그램이 사용하고 있을 수 있습니다.\x1b[0m`);
+      console.error(`- 기존 프로세스를 종료하려면 다음 명령을 실행하세요:`);
+      console.error(`  Windows: taskkill /F /IM node.exe (또는 특정 PID 종료)`);
+      console.error(`  Mac/Linux: kill -9 $(lsof -t -i:${port})`);
+    } else {
+      console.error(`\n\x1b[31m[Error] 서버 오류: ${err.message}\x1b[0m`);
+    }
+    process.exit(1);
   });
 
   server.listen(port, () => {
@@ -686,8 +711,11 @@ const handleImport = async (jsonFilePath, projectId) => {
   }
 
   await ensureSupabaseCredentials();
-  const config = loadSessionConfig();
-  const supabaseToken = config.supabase_access_token || '';
+  
+  // 환경변수 우선, 없으면 파일 로드
+  const config = fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')) : {};
+  const supabaseToken = process.env.SUPABASE_ACCESS_TOKEN || config.supabase_access_token || '';
+  const googleToken = config.google_provider_token || '';
 
   if (!supabaseToken) {
     console.error('\x1b[31m[Error] 로그인 세션이 부재합니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
