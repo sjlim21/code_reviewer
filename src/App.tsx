@@ -366,6 +366,18 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0b0f19] to-[#080b12] text-slate-100 flex flex-col justify-between">
       
+      {!isUsingRealDB && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[11px] font-semibold py-2.5 px-4 text-center flex items-center justify-center gap-2 z-50 animate-in fade-in duration-300">
+          <span>⚠️ 현재 로컬 샌드박스 데모 모드로 작동 중입니다. 실시간 데이터베이스 연동 및 AI 정밀 분석 결과를 저장하려면 <b>[분석 설정]</b> 탭에서 Supabase 정보를 입력해 주세요.</span>
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded text-[9px] font-bold uppercase transition-all cursor-pointer"
+          >
+            연동하기
+          </button>
+        </div>
+      )}
+
       {/* Navigation Header */}
       <header className="border-b border-[#26334a]/60 bg-[#131a26]/40 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
