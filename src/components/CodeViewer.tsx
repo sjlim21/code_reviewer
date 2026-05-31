@@ -128,17 +128,18 @@ const DiffCodeBlock: React.FC<DiffCodeBlockProps> = ({ code, otherCode, isOrigin
 };
 
 
+import { useAppContext } from '../context/AppContext';
+
 interface CodeViewerProps {
   issue: Issue | null;
   onClose: () => void;
-  onUpdateStatus: (issueId: string, newStatus: Issue['status']) => void;
 }
 
 export const CodeViewer: React.FC<CodeViewerProps> = ({
   issue,
-  onClose,
-  onUpdateStatus
+  onClose
 }) => {
+  const { handleUpdateStatus: onUpdateStatus } = useAppContext();
   const [newCommentText, setNewCommentText] = useState('');
   const [commentTrigger, setCommentTrigger] = useState(0);
   const [viewMode, setViewMode] = useState<'split' | 'stacked'>('split');

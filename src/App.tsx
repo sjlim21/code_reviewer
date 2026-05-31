@@ -1,12 +1,4 @@
-import { useState, useEffect } from 'react';
-import { type Session } from '@supabase/supabase-js';
-import { 
-  mockProjects, 
-  mockIssues, 
-  getSupabaseClient,
-  type Issue, 
-  type Project 
-} from './supabase';
+import { AppProvider, useAppContext } from './context/AppContext';
 import { Dashboard } from './components/Dashboard';
 import { CodeViewer } from './components/CodeViewer';
 import { Uploader } from './components/Uploader';
@@ -25,335 +17,22 @@ import {
   User
 } from 'lucide-react';
 
-function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'settings'>('dashboard');
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [isUsingRealDB, setIsUsingRealDB] = useState(false);
-  
-  const [theme, setTheme] = useState<'indigo' | 'emerald' | 'amber'>(() => {
-    return (localStorage.getItem('codeeye-theme') as 'indigo' | 'emerald' | 'amber') || 'indigo';
-  });
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('codeeye-theme', theme);
-  }, [theme]);
-  
-  // 인증 및 세션 상태 추가
-  const [session, setSession] = useState<Session | null>(null);
-  const [googleToken, setGoogleToken] = useState<string>('');
-  const [isDemoSession, setIsDemoSession] = useState(false);
-  const [isLoadingSession, setIsLoadingSession] = useState(() => !getSupabaseClient());
-
-  // 1. Supabase Auth 세션 감지 및 초기 로드
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    
-    if (!supabase) {
-      Promise.resolve().then(() => {
-        setIsLoadingSession(false);
-      });
-      return;
-    }
-
-    // 초기 세션 획득
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession);
-      if (initialSession?.provider_token) {
-        setGoogleToken(initialSession.provider_token);
-      }
-      setIsLoadingSession(false);
-      
-      // OAuth 리다이렉션 해시 파라미터 클리닝으로 무한 인증 상태 변경 루프 방지
-      if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-    });
-
-    // 인증 상태 변화 리스너 등록
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession((prev: Session | null) => {
-        // 동일 사용자 세션인 경우 상태 변경을 생략하여 무한 렌더링 루프 방지
-        if (prev?.user?.id === currentSession?.user?.id) {
-          return prev;
-        }
-        return currentSession;
-      });
-      
-      if (currentSession) {
-        // 가딩 적용: 이미 데모 세션이 꺼져있는 경우 상태 변화 렌더 트리거 방지
-        setIsDemoSession(prev => prev ? false : prev);
-        if (currentSession.provider_token) {
-          setGoogleToken(currentSession.provider_token);
-        }
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // 2. 로그인 완료 후 실시간 DB로부터 데이터 패칭 (경합 조건 및 무한 루프 방어 패치)
-  useEffect(() => {
-    let ignore = false;
-
-    const loadDBData = async () => {
-      const supabase = getSupabaseClient();
-      
-      // 인증도 없고 가상 데모 세션도 없으면 패칭 중단
-      if (!session && !isDemoSession) {
-        if (!ignore) {
-          setProjects([]);
-          setIssues([]);
-        }
-        return;
-      }
-
-      if (!supabase || isDemoSession) {
-        // Fallback to Mock Data
-        console.log("Using Mock fallback data (Demo Session).");
-        if (!ignore) {
-          setProjects(mockProjects);
-          setIssues(mockIssues);
-          setSelectedProject(mockProjects[0]);
-          setIsUsingRealDB(false);
-        }
-        return;
-      }
-
-      try {
-        if (!ignore) {
-          setIsUsingRealDB(true);
-        }
-        
-        // 프로젝트 로드
-        const { data: dbProjects, error: projError } = await supabase
-          .from('projects')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (projError) throw projError;
-        if (ignore) return;
-
-        if (dbProjects && dbProjects.length > 0) {
-          setProjects(dbProjects as Project[]);
-          setSelectedProject(current => {
-            if (current && dbProjects.some(p => p.id === current.id)) {
-              return current;
-            }
-            return dbProjects[0] as Project;
-          });
-          
-          // 첫 번째 프로젝트의 이슈 로드
-          const { data: dbIssues, error: issuesError } = await supabase
-            .from('issues')
-            .select('*')
-            .eq('project_id', dbProjects[0].id)
-            .order('priority_score', { ascending: false });
-
-          if (issuesError) throw issuesError;
-          if (!ignore) {
-            setIssues(dbIssues as Issue[]);
-          }
-        } else {
-          if (!ignore) {
-            setProjects([]);
-            setIssues([]);
-            setSelectedProject(null);
-          }
-        }
-
-      } catch (err) {
-        console.error("Supabase load error:", err);
-        if (!ignore) {
-          setProjects([]);
-          setIssues([]);
-          setSelectedProject(null);
-          setIsUsingRealDB(false);
-        }
-      }
-    };
-
-    if (!isLoadingSession) {
-      loadDBData();
-    }
-
-    return () => {
-      ignore = true;
-    };
-  }, [session, isDemoSession, isLoadingSession]);
-
-  // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드 (문자열 ID 의존성 매핑 및 경합 방지)
-  useEffect(() => {
-    let ignore = false;
-
-    const fetchIssuesForProject = async () => {
-      if (!selectedProject || !isUsingRealDB) return;
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
-      try {
-        const { data: dbIssues, error } = await supabase
-          .from('issues')
-          .select('*')
-          .eq('project_id', selectedProject.id)
-          .order('priority_score', { ascending: false });
-
-        if (error) throw error;
-        if (!ignore) {
-          setIssues(dbIssues as Issue[]);
-        }
-      } catch (err) {
-        console.error("Fetch issues error:", err);
-      }
-    };
-
-    fetchIssuesForProject();
-
-    return () => {
-      ignore = true;
-    };
-  }, [selectedProject, isUsingRealDB]);
-
-  // 4. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지, ID 의존성 패치)
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !selectedProject || !isUsingRealDB) return;
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'issues',
-          filter: `project_id=eq.${selectedProject.id}`
-        },
-        (payload) => {
-          console.log('Realtime change detected:', payload);
-          if (payload.eventType === 'INSERT') {
-            setIssues(prev => [payload.new as Issue, ...prev].sort((a, b) => b.priority_score - a.priority_score));
-          } else if (payload.eventType === 'UPDATE') {
-            setIssues(prev => prev.map(issue => issue.id === payload.new.id ? (payload.new as Issue) : issue));
-            setSelectedIssue(current => current && current.id === payload.new.id ? (payload.new as Issue) : current);
-          } else if (payload.eventType === 'DELETE') {
-            setIssues(prev => prev.filter(issue => issue.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedProject, isUsingRealDB]);
-
-  // 5. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함 - 에러 시 안전한 롤백 지원)
-  const handleUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
-    // 롤백을 위해 이전 상태 백업
-    const previousIssues = [...issues];
-    const previousSelectedIssue = selectedIssue ? { ...selectedIssue } : null;
-
-    setIssues(prevIssues => 
-      prevIssues.map(issue => 
-        issue.id === issueId 
-          ? { 
-              ...issue, 
-              status: newStatus,
-              resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null 
-            } 
-          : issue
-      )
-    );
-    if (selectedIssue && selectedIssue.id === issueId) {
-      setSelectedIssue(prev => prev ? { ...prev, status: newStatus } : null);
-    }
-
-    if (isUsingRealDB) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        try {
-          const { error } = await supabase
-            .from('issues')
-            .update({ 
-              status: newStatus,
-              resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null,
-              resolved_by: session?.user?.id || null
-            })
-            .eq('id', issueId);
-          if (error) throw error;
-        } catch (e) {
-          console.error("DB status update failed. Rolling back state:", e);
-          alert('데이터베이스 업데이트 실패로 변경 사항이 롤백되었습니다.');
-          setIssues(previousIssues);
-          setSelectedIssue(previousSelectedIssue);
-        }
-      }
-    }
-  };
-
-  // 6. 분석 완료 후 새 이슈 추가 핸들러
-  const handleAnalysisComplete = (newIssues: Issue[]) => {
-    setIssues(prev => [...newIssues, ...prev].sort((a, b) => b.priority_score - a.priority_score));
-    setActiveTab('dashboard');
-  };
-
-  // 7. 프로젝트 삭제 핸들러
-  const handleDeleteProject = async (projectId: string) => {
-    if (!window.confirm('정말로 이 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며, 프로젝트와 연결된 모든 이슈 및 분석 이력이 영구적으로 제거됩니다.')) {
-      return;
-    }
-
-    if (isUsingRealDB) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        try {
-          const { error } = await supabase
-            .from('projects')
-            .delete()
-            .eq('id', projectId);
-          if (error) throw error;
-        } catch (e) {
-          console.error("DB project delete failed:", e);
-          const errorMsg = e instanceof Error ? e.message : String(e);
-          alert('프로젝트 삭제 중 에러가 발생했습니다: ' + errorMsg);
-          return;
-        }
-      }
-    }
-
-    // 로컬 상태 동기화
-    const updatedProjects = projects.filter(p => p.id !== projectId);
-    setProjects(updatedProjects);
-
-    if (selectedProject?.id === projectId) {
-      if (updatedProjects.length > 0) {
-        setSelectedProject(updatedProjects[0]);
-      } else {
-        setSelectedProject(null);
-        setIssues([]);
-      }
-    }
-  };
-
-  // 로그아웃 핸들러
-  const handleLogout = async () => {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    setSession(null);
-    setGoogleToken('');
-    setIsDemoSession(false);
-    setSelectedProject(null);
-    setProjects([]);
-    setIssues([]);
-  };
+function AppContent() {
+  const {
+    activeTab,
+    setActiveTab,
+    selectedProject,
+    selectedIssue,
+    setSelectedIssue,
+    isUsingRealDB,
+    theme,
+    setTheme,
+    session,
+    setIsDemoSession,
+    isDemoSession,
+    isLoadingSession,
+    handleLogout
+  } = useAppContext();
 
   // 로딩 화면
   if (isLoadingSession) {
@@ -364,12 +43,12 @@ function App() {
     );
   }
 
-  // 7. 인증 가드 분기 (세션 부재 시 로그인 페이지 렌더링)
+  // 인증 가드 분기 (세션 부재 시 로그인 페이지 렌더링)
   if (!session && !isDemoSession) {
     return <Login onMockLogin={() => setIsDemoSession(true)} />;
   }
 
-  const userEmail = session?.user?.email || 'offline-demo@google.com';
+  const userEmail = session?.user?.email || 'offline-demo@github.com';
   const userName = session?.user?.user_metadata?.full_name || 'Demo User';
 
   return (
@@ -545,46 +224,21 @@ function App() {
         )}
 
         {/* Tab Router Switch */}
-        {activeTab === 'dashboard' && (
-          <Dashboard 
-            selectedProject={selectedProject}
-            onSelectProject={setSelectedProject}
-            onSelectIssue={setSelectedIssue}
-            issues={issues}
-            projects={projects}
-            onDeleteProject={handleDeleteProject}
-          />
-        )}
+        {activeTab === 'dashboard' && <Dashboard />}
 
         {activeTab === 'upload' && (
           <div className="max-w-2xl mx-auto">
-            <Uploader 
-              selectedProject={selectedProject} 
-              onAnalysisComplete={handleAnalysisComplete}
-              session={session}
-              projects={projects}
-              onProjectCreated={(newProj) => {
-                setProjects(prev => [newProj, ...prev]);
-                setSelectedProject(newProj);
-              }}
-              onProjectSelected={(proj) => {
-                setSelectedProject(proj);
-              }}
-              googleToken={googleToken}
-            />
+            <Uploader />
           </div>
         )}
 
-        {activeTab === 'settings' && (
-          <Settings project={selectedProject} />
-        )}
+        {activeTab === 'settings' && <Settings />}
 
         {/* Sidebar Slide Detail View overlay */}
         {selectedIssue && (
           <CodeViewer 
             issue={selectedIssue}
             onClose={() => setSelectedIssue(null)}
-            onUpdateStatus={handleUpdateStatus}
           />
         )}
       </main>
@@ -605,6 +259,14 @@ function App() {
       </footer>
 
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AppProvider>
+      <AppContent />
+    </AppProvider>
   );
 }
 

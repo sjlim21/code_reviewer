@@ -296,3 +296,10 @@ ON CONFLICT (category, rule_id) DO UPDATE SET
   default_severity = EXCLUDED.default_severity,
   base_score = EXCLUDED.base_score;
 
+-- 15. 성능 및 확장성 확보를 위한 인덱스 생성 (Scalability & Query Performance)
+CREATE INDEX IF NOT EXISTS idx_issues_project_id ON public.issues(project_id);
+CREATE INDEX IF NOT EXISTS idx_issues_created_at ON public.issues(created_at);
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_project_id ON public.analysis_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_created_at ON public.analysis_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_project_members_user_proj ON public.project_members(user_id, project_id);
+

@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { STORAGE_KEYS, type Project } from '../supabase';
+import { STORAGE_KEYS } from '../supabase';
 import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database, Info } from 'lucide-react';
 
-interface SettingsProps {
-  project: Project | null;
-}
+import { useAppContext } from '../context/AppContext';
 
-export const Settings: React.FC<SettingsProps> = ({ project }) => {
+export const Settings: React.FC = () => {
+  const { selectedProject: project, isUsingRealDB, session, isDemoSession } = useAppContext();
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
 
   const [slackUrl, setSlackUrl] = useState('');
   const [discordUrl, setDiscordUrl] = useState('');
   const [ignorePaths, setIgnorePaths] = useState('node_modules/, dist/, build/, *.min.js');
+  
+  const isEnvSupabaseUrlActive = !!import.meta.env.VITE_SUPABASE_URL;
+  const isEnvSupabaseKeyActive = !!import.meta.env.VITE_SUPABASE_ANON_KEY;
+
   const [selectedLinters, setSelectedLinters] = useState({
     eslint: true,
     bandit: true,
+    cppcheck: true,
     sonar: false,
     securityScan: true
   });
@@ -37,8 +41,16 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setSupabaseUrl(deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || ''));
-    setSupabaseKey(deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || ''));
+    setSupabaseUrl(
+      isEnvSupabaseUrlActive 
+        ? import.meta.env.VITE_SUPABASE_URL 
+        : deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '')
+    );
+    setSupabaseKey(
+      isEnvSupabaseKeyActive 
+        ? import.meta.env.VITE_SUPABASE_ANON_KEY 
+        : deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '')
+    );
     setSlackUrl(deobfuscate(localStorage.getItem('code_eye_slack_webhook_url') || ''));
     setDiscordUrl(deobfuscate(localStorage.getItem('code_eye_discord_webhook_url') || ''));
     setIgnorePaths(localStorage.getItem('code_eye_ignore_paths') || 'node_modules/, dist/, build/, *.min.js');
@@ -51,14 +63,18 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
         // Fallback
       }
     }
-  }, []);
+  }, [isEnvSupabaseUrlActive, isEnvSupabaseKeyActive]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
-    localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, obfuscate(supabaseUrl.trim()));
-    localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, obfuscate(supabaseKey.trim()));
+    if (!isEnvSupabaseUrlActive) {
+      sessionStorage.setItem(STORAGE_KEYS.SUPABASE_URL, obfuscate(supabaseUrl.trim()));
+    }
+    if (!isEnvSupabaseKeyActive) {
+      sessionStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, obfuscate(supabaseKey.trim()));
+    }
     localStorage.setItem('code_eye_slack_webhook_url', obfuscate(slackUrl.trim()));
     localStorage.setItem('code_eye_discord_webhook_url', obfuscate(discordUrl.trim()));
     localStorage.setItem('code_eye_ignore_paths', ignorePaths.trim());
@@ -94,23 +110,31 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-slate-400 block">Supabase URL</label>
+                <label className="text-[11px] font-semibold text-slate-400 block flex items-center justify-between">
+                  <span>Supabase URL</span>
+                  {isEnvSupabaseUrlActive && <span className="text-[9px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 font-sans">환경 변수(Read-only)</span>}
+                </label>
                 <input
                   type="text"
                   placeholder="https://your-project.supabase.co"
                   value={supabaseUrl}
                   onChange={e => setSupabaseUrl(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                  disabled={isEnvSupabaseUrlActive}
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono ${isEnvSupabaseUrlActive ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-slate-400 block">Supabase Anon Key</label>
+                <label className="text-[11px] font-semibold text-slate-400 block flex items-center justify-between">
+                  <span>Supabase Anon Key</span>
+                  {isEnvSupabaseKeyActive && <span className="text-[9px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 font-sans">환경 변수(Read-only)</span>}
+                </label>
                 <input
                   type="password"
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                   value={supabaseKey}
                   onChange={e => setSupabaseKey(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                  disabled={isEnvSupabaseKeyActive}
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono ${isEnvSupabaseKeyActive ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
             </div>
@@ -119,19 +143,54 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
             </p>
           </div>
 
-          {/* 2. Google OAuth & Gemini AI Info Card */}
+          {/* 2. Authentication & Static Analysis Engine Info Card */}
           <div className="p-4 bg-indigo-950/20 border border-indigo-500/20 rounded-xl space-y-2.5">
             <h3 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
               <Key size={14} className="text-indigo-400" />
-              Gemini AI 통합 라이센스 적용
+              진단 엔진 및 연동 환경 정보
             </h3>
-            <p className="text-xs text-indigo-200/80 leading-relaxed">
-              구글 OAuth 로그인이 완료됨에 따라, 시스템 전역에 내장된 고성능 **Gemini 2.5** 모델이 자동으로 활성화되었습니다. 
-              사용자가 개별적으로 API Key를 생성 및 관리할 필요 없이 소셜 인증 세션만으로도 코드 정밀 스캔 기능을 완전 무상으로 사용하실 수 있습니다.
-            </p>
-            <div className="flex items-center gap-2 text-[10px] text-indigo-400/80 font-semibold font-mono">
-              <Info size={12} />
-              Google Provider License: Active
+            
+            <div className="space-y-1 text-xs leading-relaxed">
+              {isUsingRealDB ? (
+                <p className="text-emerald-300 font-semibold flex items-center gap-1">
+                  <Check size={12} className="text-emerald-400" />
+                  클라우드 모드 활성화됨 (Supabase DB 연동)
+                </p>
+              ) : (
+                <p className="text-amber-400 font-semibold flex items-center gap-1">
+                  <Info size={12} className="text-amber-400" />
+                  오프라인 데모 모드 (로컬 시뮬레이션)
+                </p>
+              )}
+              
+              {session ? (
+                <p className="text-slate-300">
+                  인증 상태: **GitHub 계정 로그인 완료** (사용자 ID: <code className="text-slate-400 text-[10px]">{session.user?.id}</code>)
+                </p>
+              ) : isDemoSession ? (
+                <p className="text-slate-300">
+                  인증 상태: **데모 사용자 세션** (이름: <code className="text-slate-400 text-[10px]">demo-user</code>)
+                </p>
+              ) : (
+                <p className="text-slate-300">
+                  인증 상태: **미인증 상태**
+                </p>
+              )}
+            </div>
+
+            <div className="border-t border-slate-800/80 my-2 pt-2 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Local Static AST Analyzer</span>
+                <span className="text-emerald-400 font-bold uppercase">Active (C/C++, JS/TS, Python)</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Gemini 1.5 Deep Scan</span>
+                {import.meta.env.VITE_GEMINI_API_KEY ? (
+                  <span className="text-emerald-400 font-bold uppercase">Active (API Key detected)</span>
+                ) : (
+                  <span className="text-slate-500 font-bold uppercase">Inactive (Running in Local Fallback)</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -155,7 +214,7 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
               <Shield size={14} />
               활성화 분석 파이프라인 (Linter Engines)
             </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
               <label className="flex items-center gap-3 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl cursor-pointer hover:border-slate-700/80 transition-all">
                 <input
                   type="checkbox"
@@ -179,6 +238,19 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
                 <div>
                   <div className="text-xs font-semibold text-slate-300">Bandit / Flake8 (Python)</div>
                   <div className="text-[10px] text-slate-500 mt-0.5">파이썬 취약점 정적 진단</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl cursor-pointer hover:border-slate-700/80 transition-all">
+                <input
+                  type="checkbox"
+                  checked={selectedLinters.cppcheck}
+                  onChange={e => setSelectedLinters(prev => ({ ...prev, cppcheck: e.target.checked }))}
+                  className="rounded text-indigo-500 focus:ring-0 focus:ring-offset-0 bg-slate-950 border-slate-800 w-4 h-4"
+                />
+                <div>
+                  <div className="text-xs font-semibold text-slate-300">C/C++ Pointer Safety</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">메모리 누수 및 버퍼 오버플로우 진단</div>
                 </div>
               </label>
             </div>

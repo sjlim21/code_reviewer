@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { FolderOpen, Folder, FileCode, AlertCircle, CheckCircle, RefreshCw, Trash2, Play } from 'lucide-react';
 import { getSupabaseClient, type Issue, type Project } from '../supabase';
 import { analyzeCodeWithGemini } from '../geminiAnalyzer';
-import { type Session } from '@supabase/supabase-js';
+
 
 interface FileSystemEntry {
   isFile: boolean;
@@ -84,6 +84,25 @@ const getLanguageFromExtension = (filename: string) => {
   }
 };
 
+const getFileBadgeColor = (filename: string) => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'c':
+    case 'cpp':
+    case 'cc':
+    case 'h': return 'text-blue-400 bg-blue-500/10 border-blue-500/20';
+    case 'cs': return 'text-purple-400 bg-purple-500/10 border-purple-500/20';
+    case 'java': return 'text-red-400 bg-red-500/10 border-red-500/20';
+    case 'py': return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
+    case 'go': return 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20';
+    case 'js':
+    case 'jsx': return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+    case 'ts':
+    case 'tsx': return 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20';
+    default: return 'text-slate-400 bg-slate-500/10 border-slate-500/20';
+  }
+};
+
 const getValidationStatus = (file: File) => {
   const name = file.name.toLowerCase();
   const isSupported = SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext));
@@ -136,25 +155,23 @@ const buildFileTree = (files: File[]): FileTreeNode => {
   return root;
 };
 
-interface UploaderProps {
-  selectedProject: Project | null;
-  onAnalysisComplete: (newIssues: Issue[]) => void;
-  session?: Session | null;
-  projects?: Project[];
-  onProjectCreated?: (newProj: Project) => void;
-  onProjectSelected?: (proj: Project) => void;
-  googleToken?: string;
-}
+import { useAppContext } from '../context/AppContext';
 
-export const Uploader: React.FC<UploaderProps> = ({
-  selectedProject,
-  onAnalysisComplete,
-  session,
-  projects,
-  onProjectCreated,
-  onProjectSelected,
-  googleToken
-}) => {
+export const Uploader: React.FC = () => {
+  const {
+    selectedProject,
+    handleAnalysisComplete: onAnalysisComplete,
+    session,
+    projects,
+    setSelectedProject: onProjectSelected,
+    setProjects
+  } = useAppContext();
+
+  // Helper for creating a new project in context
+  const onProjectCreated = (newProj: Project) => {
+    setProjects(prev => [newProj, ...prev]);
+    if (onProjectSelected) onProjectSelected(newProj);
+  };
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'done'>('idle');
   const [progress, setProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
@@ -231,26 +248,28 @@ export const Uploader: React.FC<UploaderProps> = ({
     const file = node.file;
     if (!file) return null;
     const status = getValidationStatus(file);
+    const lang = getLanguageFromExtension(file.name);
+    const badgeStyle = getFileBadgeColor(file.name);
     
     return (
       <div 
         key={path}
-        className="flex items-center justify-between py-1 px-2 hover:bg-slate-900/30 rounded-lg transition-colors"
+        className="flex items-center justify-between py-1.5 px-2 hover:bg-slate-900/30 rounded-lg transition-colors border border-transparent hover:border-slate-800/40"
         style={{ paddingLeft: '8px' }}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <FileCode size={13} className="text-slate-500 shrink-0" />
-          <span className="text-xs text-slate-400 truncate font-mono" title={node.name}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <FileCode size={13} className={`shrink-0 ${file.name.split('.').pop()?.toLowerCase() ? badgeStyle.split(' ')[0] : 'text-slate-500'}`} />
+          <span className="text-xs text-slate-300 truncate font-mono" title={node.name}>
             {node.name}
           </span>
-          <span className="text-[10px] text-slate-600 font-mono shrink-0">
+          <span className="text-[10px] text-slate-500 font-mono shrink-0">
             ({formatFileSize(file.size)})
           </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[9px] text-slate-600 font-mono hidden md:inline">
-            {getLanguageFromExtension(file.name)}
+          <span className={`px-2 py-0.5 rounded border text-[9px] font-bold font-mono tracking-wide ${badgeStyle}`}>
+            {lang}
           </span>
           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
             status.valid 
@@ -437,24 +456,25 @@ export const Uploader: React.FC<UploaderProps> = ({
       const scanFile = async (file: File) => {
         try {
           // 파일 텍스트 추출
-          const codeContent = await new Promise<string>((resolve, reject) => {
+          let codeContent: string | null = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target?.result as string || '');
             reader.onerror = (err) => reject(err);
             reader.readAsText(file);
           });
 
-          // 주입받은 Google OAuth Access Token 사용 (메모리 보관으로 보안 강화)
-          const activeToken = googleToken || '';
-
-          // Gemini API 스캔 (Google OAuth 토큰 전달)
+          // Gemini API 스캔
           const detectedIssues = await analyzeCodeWithGemini(
             file.name,
             codeContent,
             activeProjId,
             runId,
-            activeToken
+            session?.provider_token || undefined
           );
+          
+          // Free string reference immediately to allow garbage collection
+          codeContent = null;
+
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {
           console.warn(`File analysis failed for ${file.name}, skipping.`, scanErr);
@@ -575,7 +595,7 @@ export const Uploader: React.FC<UploaderProps> = ({
   return (
     <div className="glass-panel rounded-2xl p-6 shadow-xl animate-in fade-in duration-300">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-300">실시간 Gemini 3.5 AI 폴더 정밀 분석</h3>
+        <h3 className="text-sm font-semibold text-slate-300">실시간 Gemini 1.5 AI 폴더 정밀 분석</h3>
         <span className="text-xs text-slate-500">탐색기 폴더 단위 업로드</span>
       </div>
 
@@ -673,7 +693,7 @@ export const Uploader: React.FC<UploaderProps> = ({
             onClick={() => document.getElementById('folder-input')?.click()}
             className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300 ${
               isDragging 
-                ? 'border-indigo-500 bg-indigo-600/5 shadow-[0_0_25px_0_rgba(99,102,241,0.15)] scale-[1.01]' 
+                ? 'border-indigo-500 bg-indigo-950/40 backdrop-blur-md scale-[1.01] drag-active-glow' 
                 : 'border-slate-800 hover:border-slate-700/80 hover:bg-slate-900/10'
             }`}
           >
@@ -728,7 +748,7 @@ export const Uploader: React.FC<UploaderProps> = ({
                   {uploadStatus === 'analyzing' && (
                     <>
                       <RefreshCw size={10} className="animate-spin text-indigo-400" />
-                      Gemini 3.5 결함 스캔 중
+                      Gemini 1.5 결함 스캔 중
                     </>
                   )}
                   {uploadStatus === 'done' && (
@@ -761,6 +781,27 @@ export const Uploader: React.FC<UploaderProps> = ({
               </div>
             </div>
           </div>
+          
+          {/* Laser Container for scanning effect during analysis */}
+          {uploadStatus === 'analyzing' && (
+            <div className="mt-5 border border-slate-800/80 bg-slate-950/50 rounded-xl p-4 laser-container max-h-40 overflow-hidden relative">
+              <div className="laser-line"></div>
+              <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                Active Laser Scanner
+              </div>
+              <div className="space-y-1.5">
+                {/* Show a few lines of files with the current scanning one highlighted */}
+                <div className="flex items-center justify-between text-xs py-1 px-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 rounded-lg font-mono animate-pulse">
+                  <span className="truncate flex items-center gap-2">
+                    <FileCode size={12} className="text-indigo-400" />
+                    {currentScanningFile || 'Scanning...'}
+                  </span>
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wide">Scanning</span>
+                </div>
+              </div>
+            </div>
+          )}
           
           {uploadStatus === 'done' && (
             <button

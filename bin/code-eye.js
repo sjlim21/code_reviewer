@@ -314,14 +314,15 @@ const handleLogin = async () => {
 
   server.listen(port, () => {
     // github provider 지정하여 Supabase 인증 획득
-    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=github&redirect_to=http://localhost:${port}/callback`;
+    const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=github&scopes=read:user&redirect_to=http://localhost:${port}/callback`;
     console.log(`\n\x1b[34m[Auth] GitHub OAuth 로그인창을 여는 중...\x1b[0m`);
     console.log(`- 아래 주소를 브라우저에 복사해 직접 접속하셔도 됩니다:\n  ${oauthUrl}\n`);
     
     try {
       if (os.platform() === 'win32') {
-        const escapedUrl = oauthUrl.replace(/&/g, '^&');
-        execFileSync('cmd.exe', ['/c', 'start', '', escapedUrl]);
+        // Use rundll32.exe url.dll,FileProtocolHandler to safely open URLs in default browser directly
+        // without spawning cmd.exe shell, making it completely immune to command injections.
+        execFileSync('rundll32.exe', ['url.dll,FileProtocolHandler', oauthUrl]);
       } else {
         const startCmd = os.platform() === 'darwin' ? 'open' : 'xdg-open';
         execFileSync(startCmd, [oauthUrl]);
@@ -347,19 +348,19 @@ const refreshSessionIfNeeded = async () => {
 
   if (!supabaseToken) return false;
 
-  // Check if token is expired or close to expiring (within 5 minutes)
+  // Verify JWT dynamically by contacting the Supabase server's user profile verification endpoint.
+  // This prevents clock-skew errors and guarantees validation against server-side token revocation.
   let isExpired = false;
   try {
-    const payloadBase64 = supabaseToken.split('.')[1];
-    if (payloadBase64) {
-      const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-      if (decoded && decoded.exp) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        // Expired if current time + 300 seconds (5 min) >= exp
-        if (currentTime + 300 >= decoded.exp) {
-          isExpired = true;
-        }
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${supabaseToken}`
       }
+    });
+    if (!res.ok) {
+      isExpired = true;
     }
   } catch (e) {
     isExpired = true;
@@ -660,11 +661,28 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
         });
 
         if (!projCreateRes.ok) {
-          const errTxt = await projCreateRes.text();
-          throw new Error(`DB 프로젝트 등록 에러: ${errTxt}`);
+          if (projCreateRes.status === 409) {
+            // Concurrently created by another process, fetch and map it
+            const searchRes2 = await fetch(`${SUPABASE_URL}/rest/v1/projects?name=eq.${encodeURIComponent(folderName)}`, {
+              method: 'GET',
+              headers: dbHeaders
+            });
+            if (searchRes2.ok) {
+              const projs2 = await searchRes2.json();
+              if (projs2 && projs2.length > 0) {
+                activeProjectId = projs2[0].id;
+                console.log(`\x1b[32m- 동시 등록 충돌이 발생하였으나 기존 프로젝트로 자동 전환 매핑했습니다. (ID: ${activeProjectId})\x1b[0m`);
+              }
+            }
+          }
+          if (!activeProjectId) {
+            const errTxt = await projCreateRes.text();
+            throw new Error(`DB 프로젝트 등록 에러: ${errTxt}`);
+          }
+        } else {
+          activeProjectId = newProjId;
+          console.log(`\x1b[32m- 새 프로젝트를 Supabase DB에 성공적으로 등록했습니다! (ID: ${activeProjectId})\x1b[0m`);
         }
-        activeProjectId = newProjId;
-        console.log(`\x1b[32m- 새 프로젝트를 Supabase DB에 성공적으로 등록했습니다! (ID: ${activeProjectId})\x1b[0m`);
       }
     } catch (err) {
       console.error(`\x1b[31m[Project Error] 프로젝트 자동 매핑 실패:\x1b[0m`, err.message);
@@ -859,7 +877,7 @@ const handleImport = async (jsonFilePath, projectId) => {
     }
   }
 
-  const importedIssues = JSON.parse(fs.readFileSync(jsonFilePath, 'utf-8'));
+  const importedIssues = JSON.parse(await fs.promises.readFile(jsonFilePath, 'utf-8'));
   console.log(`\x1b[34m[Import] 외부 분석 결과 '${jsonFilePath}' 로드 완료. (이슈: ${importedIssues.length}개)\x1b[0m`);
 
   let activeProjectId = projectId;
@@ -886,13 +904,13 @@ const handleImport = async (jsonFilePath, projectId) => {
     }
 
     if (!activeProjectId) {
-      activeProjectId = crypto.randomUUID();
-      console.log(`\x1b[34m- 새 프로젝트 생성 중... (이름: ${targetName}, ID: ${activeProjectId})\x1b[0m`);
+      const newProjId = crypto.randomUUID();
+      console.log(`\x1b[34m- 새 프로젝트 생성 중... (이름: ${targetName}, ID: ${newProjId})\x1b[0m`);
       const projCreateRes = await fetch(`${SUPABASE_URL}/rest/v1/projects`, {
         method: 'POST',
         headers: dbHeaders,
         body: JSON.stringify({
-          id: activeProjectId,
+          id: newProjId,
           name: targetName,
           description: 'Imported via Gemini CLI Hybrid Workflow',
           owner_id: ownerId,
@@ -901,9 +919,27 @@ const handleImport = async (jsonFilePath, projectId) => {
         })
       });
       if (!projCreateRes.ok) {
-        const err = await projCreateRes.text();
-        console.error('\x1b[31m- [Error] 프로젝트 생성 실패:\x1b[0m', err);
-        process.exit(1);
+        if (projCreateRes.status === 409) {
+          // Concurrently created by another process, fetch and map it
+          const searchRes2 = await fetch(`${SUPABASE_URL}/rest/v1/projects?name=eq.${encodeURIComponent(targetName)}`, {
+            method: 'GET',
+            headers: dbHeaders
+          });
+          if (searchRes2.ok) {
+            const projs2 = await searchRes2.json();
+            if (projs2 && projs2.length > 0) {
+              activeProjectId = projs2[0].id;
+              console.log(`\x1b[32m- 동시 생성 충돌이 발생하였으나 기존 프로젝트로 자동 매핑했습니다. (ID: ${activeProjectId})\x1b[0m`);
+            }
+          }
+        }
+        if (!activeProjectId) {
+          const err = await projCreateRes.text();
+          console.error('\x1b[31m- [Error] 프로젝트 생성 실패:\x1b[0m', err);
+          process.exit(1);
+        }
+      } else {
+        activeProjectId = newProjId;
       }
     }
   }

@@ -1,9 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  type Issue, 
-  type Project 
-} from '../supabase';
-import { 
   AlertTriangle, 
   Activity, 
   CheckCircle, 
@@ -49,20 +45,28 @@ const severityGlows: { [key: string]: string } = {
 
 interface CustomAreaTooltipProps {
   active?: boolean;
-  payload?: Array<{ value: number }>;
+  payload?: Array<{ value: number; dataKey?: string | number }>;
   label?: string;
 }
 
 const CustomAreaTooltip: React.FC<CustomAreaTooltipProps> = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
-      <div className="glass-panel border border-indigo-500/35 rounded-xl p-3 shadow-2xl backdrop-blur-md bg-slate-950/85 text-xs font-sans">
+      <div className="glass-panel border border-indigo-500/35 rounded-xl p-3.5 shadow-2xl backdrop-blur-md bg-slate-950/85 text-xs font-sans space-y-1.5">
         <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1 font-mono">{label}</p>
-        <div className="flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-          <span className="text-slate-400">탐지 이슈:</span>
-          <span className="text-xs font-extrabold text-slate-100 font-mono">{payload[0].value}개</span>
-        </div>
+        {payload.map((p, idx) => {
+          const isResolved = p.dataKey === 'resolved';
+          const dotColor = isResolved ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400 animate-pulse';
+          const labelText = isResolved ? '해결 완료' : '미해결 결함';
+          const textColor = isResolved ? 'text-emerald-400' : 'text-rose-400';
+          return (
+            <div key={idx} className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+              <span className="text-slate-400">{labelText}:</span>
+              <span className={`text-xs font-extrabold font-mono ${textColor}`}>{p.value}개</span>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -96,23 +100,18 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({ active, payload }) 
   return null;
 };
 
-interface DashboardProps {
-  selectedProject: Project | null;
-  onSelectProject: (project: Project) => void;
-  onSelectIssue: (issue: Issue) => void;
-  issues: Issue[];
-  projects: Project[];
-  onDeleteProject: (projectId: string) => void;
-}
+import { useAppContext } from '../context/AppContext';
 
-export const Dashboard: React.FC<DashboardProps> = ({
-  selectedProject,
-  onSelectProject,
-  onSelectIssue,
-  issues,
-  projects,
-  onDeleteProject
-}) => {
+export const Dashboard: React.FC = () => {
+  const {
+    selectedProject,
+    setSelectedProject: onSelectProject,
+    setSelectedIssue: onSelectIssue,
+    issues,
+    projects,
+    handleDeleteProject: onDeleteProject
+  } = useAppContext();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -228,12 +227,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return counts;
   }, [projectIssues]);
 
-  // 차트 데이터 (최근 7일간의 이슈 분석 추이 트렌드 동적 계산)
-  const chartTrendData = useMemo(() => {
-    const dates: { name: string; dateRaw: string; issues: number }[] = [];
+  // 프로젝트 건강성 수치 계산 (Health Grade)
+  const healthScore = useMemo(() => {
+    let score = 100;
+    projectIssues.forEach(issue => {
+      if (issue.status === 'open' || issue.status === 'in_progress') {
+        if (issue.severity === 'critical') score -= 15;
+        else if (issue.severity === 'high') score -= 10;
+        else if (issue.severity === 'medium') score -= 5;
+        else if (issue.severity === 'low') score -= 2;
+      }
+    });
+    return Math.max(0, score);
+  }, [projectIssues]);
+
+  const healthGrade = useMemo(() => {
+    if (healthScore >= 90) return 'A';
+    if (healthScore >= 80) return 'B';
+    if (healthScore >= 70) return 'C';
+    if (healthScore >= 60) return 'D';
+    return 'F';
+  }, [healthScore]);
+
+  const scoreColor = useMemo(() => {
+    if (healthScore >= 90) return 'text-emerald-400';
+    if (healthScore >= 75) return 'text-indigo-400';
+    if (healthScore >= 60) return 'text-amber-400';
+    return 'text-rose-500';
+  }, [healthScore]);
+
+  // 최근 30일 누적 이슈 추이 트렌드 (미해결 vs 해결됨) 및 해결 속도 연산
+  const { chartTrend30Days, velocityMetrics } = useMemo(() => {
+    const dates: { name: string; dateRaw: string; open: number; resolved: number }[] = [];
     
-    // 최근 7일 날짜 리스트 생성
-    for (let i = 6; i >= 0; i--) {
+    // 최근 30일 날짜 목록 추출
+    for (let i = 29; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })
@@ -243,30 +271,70 @@ export const Dashboard: React.FC<DashboardProps> = ({
       dates.push({
         dateRaw: d.toISOString().split('T')[0],
         name: dateStr,
-        issues: 0
+        open: 0,
+        resolved: 0
       });
     }
 
-    // 각 날짜별로 탐지된 이슈 개수 집계
+    // 각 날짜별 누적 결함 수 계산
+    dates.forEach(d => {
+      const targetTime = new Date(d.dateRaw + 'T23:59:59').getTime();
+      let openCount = 0;
+      let resolvedCount = 0;
+
+      projectIssues.forEach(issue => {
+        const createdTime = new Date(issue.created_at).getTime();
+        if (createdTime <= targetTime) {
+          if (issue.status === 'resolved' && issue.resolved_at) {
+            const resolvedTime = new Date(issue.resolved_at).getTime();
+            if (resolvedTime <= targetTime) {
+              resolvedCount++;
+            } else {
+              openCount++;
+            }
+          } else {
+            openCount++;
+          }
+        }
+      });
+
+      d.open = openCount;
+      d.resolved = resolvedCount;
+    });
+
+    // 만약 데이터가 전무하면, 데모 시뮬레이션용 완만한 가이드 트렌드로 대체
+    const hasAnyOpen = dates.some(d => d.open > 0 || d.resolved > 0);
+    if (!hasAnyOpen) {
+      dates.forEach((d, idx) => {
+        d.open = [15, 14, 16, 13, 12, 11, 12, 10, 9, 8, 9, 7, 8, 6, 7, 5, 6, 7, 5, 4, 3, 4, 3, 2, 3, 2, 1, 1, 0, 0][idx] ?? 0;
+        d.resolved = [0, 1, 2, 4, 5, 6, 6, 8, 9, 10, 10, 12, 12, 14, 14, 16, 16, 16, 18, 19, 20, 20, 21, 22, 22, 23, 24, 24, 25, 25][idx] ?? 0;
+      });
+    }
+
+    // 평균 해결 속도 (created_at -> resolved_at 시간 편차 계산)
+    let totalResolveTime = 0;
+    let resolvedCount = 0;
     projectIssues.forEach(issue => {
-      if (!issue.created_at) return;
-      const issueDate = issue.created_at.split('T')[0];
-      const match = dates.find(d => d.dateRaw === issueDate);
-      if (match) {
-        match.issues++;
+      if (issue.status === 'resolved' && issue.resolved_at && issue.created_at) {
+        const t1 = new Date(issue.created_at).getTime();
+        const t2 = new Date(issue.resolved_at).getTime();
+        const diffHours = (t2 - t1) / (1000 * 60 * 60);
+        if (diffHours >= 0) {
+          totalResolveTime += diffHours;
+          resolvedCount++;
+        }
       }
     });
 
-    // 만약 전체 데이터가 0개인 가상/데모 모드인 경우, 시각적 아름다움을 위해 완만하게 상승하는 가이드 트렌드로 보정
-    const hasAnyIssues = dates.some(d => d.issues > 0);
-    if (!hasAnyIssues) {
-      return dates.map((d, idx) => ({
-        name: d.name,
-        issues: [3, 5, 8, 4, 7, 9, projectIssues.length || 6][idx]
-      }));
-    }
+    const avgVelocity = resolvedCount > 0 ? (totalResolveTime / resolvedCount).toFixed(1) : 'N/A';
 
-    return dates.map(d => ({ name: d.name, issues: d.issues }));
+    return {
+      chartTrend30Days: dates,
+      velocityMetrics: {
+        avgHours: avgVelocity,
+        count: resolvedCount
+      }
+    };
   }, [projectIssues]);
 
   const chartCategoryData = useMemo(() => {
@@ -282,7 +350,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       
       {/* Dynamic Health Stats Summary */}
       {projectIssues.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in duration-300">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300">
           
           {/* Left Dial: Circular Resolution Rate Gauge */}
           <div className="glass-panel rounded-2xl p-6 flex items-center justify-between shadow-xl gap-6">
@@ -342,6 +410,85 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="absolute flex flex-col items-center justify-center">
                       <span className="text-2xl font-black text-slate-100 font-mono tracking-tight">{rate}%</span>
                       <span className="text-[9px] uppercase font-bold text-slate-500 font-sans tracking-wide">Rate</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Middle Dial: Circular Health Grade Widget */}
+          <div className="glass-panel rounded-2xl p-6 flex items-center justify-between shadow-xl gap-6">
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <ShieldAlert className="text-indigo-400" size={16} />
+                프로젝트 품질 등급 (Health)
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                미해결 결함들의 심각도 가중치를 반영하여 계산된 종합 품질 점수 및 등급입니다.
+              </p>
+              <div className="text-xs font-semibold text-slate-400 mt-2 font-mono">
+                품질 점수: <span className={scoreColor}>{healthScore}</span> / 100
+              </div>
+            </div>
+
+            {/* SVG Circle Gauge */}
+            <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+              {(() => {
+                const radius = 40;
+                const circumference = 2 * Math.PI * radius;
+                const strokeDashoffset = circumference - (healthScore / 100) * circumference;
+                const gradientId = healthScore >= 90 ? 'healthGradientA' :
+                                   healthScore >= 75 ? 'healthGradientB' :
+                                   healthScore >= 60 ? 'healthGradientC' :
+                                   'healthGradientF';
+                return (
+                  <>
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                      {/* Gray track background */}
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r={radius}
+                        className="stroke-slate-800"
+                        strokeWidth="8"
+                        fill="transparent"
+                      />
+                      {/* Gradient track foreground */}
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r={radius}
+                        stroke={`url(#${gradientId})`}
+                        strokeWidth="8"
+                        fill="transparent"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={strokeDashoffset}
+                        strokeLinecap="round"
+                        className="transition-all duration-1000 ease-out"
+                      />
+                      <defs>
+                        <linearGradient id="healthGradientA" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#10b981" />
+                          <stop offset="100%" stopColor="#059669" />
+                        </linearGradient>
+                        <linearGradient id="healthGradientB" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#6366f1" />
+                          <stop offset="100%" stopColor="#4f46e5" />
+                        </linearGradient>
+                        <linearGradient id="healthGradientC" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#eab308" />
+                          <stop offset="100%" stopColor="#ca8a04" />
+                        </linearGradient>
+                        <linearGradient id="healthGradientF" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#f43f5e" />
+                          <stop offset="100%" stopColor="#e11d48" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                    <div className="absolute flex flex-col items-center justify-center">
+                      <span className={`text-3xl font-black font-mono tracking-tight ${scoreColor}`}>{healthGrade}</span>
+                      <span className="text-[9px] uppercase font-bold text-slate-500 font-sans tracking-wide">Grade</span>
                     </div>
                   </>
                 );
@@ -623,30 +770,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Trend Area Chart */}
-        <div className="glass-panel rounded-2xl p-6 md:col-span-2 shadow-xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-              <TrendingUp size={16} className="text-indigo-400" />
-              이슈 분석 추이 트렌드
-            </h3>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">최근 7일 분석 로그</span>
-          </div>
-          
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%" id="trend-chart-container">
-              <AreaChart data={chartTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="glowIndigo" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="name" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} dy={10} />
-                <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} dx={-10} />
-                <Tooltip content={<CustomAreaTooltip />} />
-                <Area type="monotone" dataKey="issues" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#glowIndigo)" />
-              </AreaChart>
-            </ResponsiveContainer>
+        <div className="glass-panel rounded-2xl p-6 md:col-span-2 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                  <TrendingUp size={16} className="text-indigo-400" />
+                  이슈 해결 추이 및 속도
+                </h3>
+                <p className="text-[11px] text-slate-500">최근 30일 동안 발생한 결함과 해결된 결함의 실시간 추이입니다.</p>
+              </div>
+              
+              {/* Velocity statistics cards */}
+              <div className="flex items-center gap-3">
+                <div className="bg-indigo-950/40 border border-indigo-500/20 px-3 py-1.5 rounded-xl text-center">
+                  <div className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">평균 해결 시간</div>
+                  <div className="text-xs font-bold text-indigo-100 font-mono mt-0.5">{velocityMetrics.avgHours === 'N/A' ? '데이터 없음' : `${velocityMetrics.avgHours}시간`}</div>
+                </div>
+                <div className="bg-emerald-950/40 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-center">
+                  <div className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">해결 완료 건수</div>
+                  <div className="text-xs font-bold text-emerald-100 font-mono mt-0.5">{velocityMetrics.count}건</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%" id="trend-chart-container">
+                <AreaChart data={chartTrend30Days} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="glowRose" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="glowEmerald" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="name" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} dy={10} />
+                  <YAxis stroke="#475569" fontSize={10} tickLine={false} axisLine={false} dx={-10} />
+                  <Tooltip content={<CustomAreaTooltip />} />
+                  <Area type="monotone" dataKey="open" stroke="#f43f5e" strokeWidth={2.5} fillOpacity={1} fill="url(#glowRose)" name="미해결 결함" />
+                  <Area type="monotone" dataKey="resolved" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#glowEmerald)" name="해결 완료" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 

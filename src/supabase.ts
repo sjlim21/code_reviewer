@@ -1,10 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// LocalStorage 키 정의
+// SessionStorage 키 정의
 export const STORAGE_KEYS = {
   SUPABASE_URL: 'code_eye_supabase_url',
-  SUPABASE_ANON_KEY: 'code_eye_supabase_anon_key',
-  GEMINI_API_KEY: 'code_eye_gemini_api_key'
+  SUPABASE_ANON_KEY: 'code_eye_supabase_anon_key'
 };
 
 const deobfuscate = (str: string) => {
@@ -25,8 +24,19 @@ export const getSupabaseClient = (): SupabaseClient | null => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   
-  const localUrl = deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
-  const localKey = deobfuscate(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
+  // Clean up any remaining legacy localStorage keys for security
+  if (localStorage.getItem('code_eye_supabase_url')) {
+    localStorage.removeItem('code_eye_supabase_url');
+  }
+  if (localStorage.getItem('code_eye_supabase_anon_key')) {
+    localStorage.removeItem('code_eye_supabase_anon_key');
+  }
+  if (localStorage.getItem('code_eye_gemini_api_key')) {
+    localStorage.removeItem('code_eye_gemini_api_key');
+  }
+
+  const localUrl = deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
+  const localKey = deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
 
   const url = envUrl || localUrl || '';
   const key = envKey || localKey || '';
