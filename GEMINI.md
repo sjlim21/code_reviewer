@@ -32,10 +32,23 @@
     -   Functional components with explicit type definitions for props and state.
     -   Mock data is available in `supabase.ts` for rapid prototyping without a backend.
 
-## Key Files
+## Custom Workflows
 
--   `src/App.tsx`: Main application entry point managing routing and core state.
--   `src/supabase.ts`: Database types, interface definitions, and mock data.
--   `src/geminiAnalyzer.ts`: AI analysis service using Gemini 3.5 Flash.
--   `src/agents/code-reviewer-agent.md`: The system prompt defining the AI reviewer's behavior.
--   `setup.sql`: SQL script for initializing the Supabase database schema.
+### 👁️ CodeEye AI Review (Hybrid)
+This workflow performs high-quality AI code review without API costs, optimized for **C/C++** and complex systems.
+
+**Steps:**
+1.  **Analyze**: Orchestrator (Gemini) reads source code and identifies issues following `src/agents/code-reviewer-agent.md`.
+2.  **Generate**: Results are saved to `issues.json` using a **mathematical priority scoring model**.
+3.  **Upload**: Run `node bin/code-eye.js import issues.json --project <ID>`.
+
+**C/C++ Special Focus:**
+-   Memory management (Leaks, Buffer overflows).
+-   Pointer safety & Pointer arithmetic.
+-   Concurrency/Race conditions in low-level code.
+
+**Mathematical Priority Score (α):**
+The score is calculated based on:
+`Score = (BaseSeverity * W1) + (Impact * W2) + (Reachability * W3)`
+*(Exact formula derived from security research papers).*
+

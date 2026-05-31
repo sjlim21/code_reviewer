@@ -700,13 +700,89 @@ const handleImport = async (jsonFilePath, projectId) => {
     'Prefer': 'return=representation'
   };
 
+  // 프로필 존재 여부 확인 및 자동 생성 (Self-Healing)
+  console.log(`\x1b[34m[Auth] 프로필 유효성 검사 중 (UID: ${ownerId})...\x1b[0m`);
+  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${ownerId}`, {
+    method: 'GET',
+    headers: dbHeaders
+  });
+
+  if (profileRes.ok) {
+    const profiles = await profileRes.json();
+    if (!profiles || profiles.length === 0) {
+      console.log(`\x1b[33m- 프로필 미존재. 자동 생성 시도...\x1b[0m`);
+      const createProfileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+        method: 'POST',
+        headers: dbHeaders,
+        body: JSON.stringify({
+          id: ownerId,
+          display_name: 'CLI User',
+          role: 'admin'
+        })
+      });
+      if (!createProfileRes.ok) {
+        const err = await createProfileRes.text();
+        console.error('\x1b[31m- [Error] 프로필 생성 실패 (RLS 정책 확인 필요):\x1b[0m', err);
+        // 무시하고 진행 시도 (이미 있을 수도 있으므로)
+      } else {
+        console.log(`\x1b[32m- 프로필 생성 완료.\x1b[0m`);
+      }
+    } else {
+      console.log(`\x1b[32m- 프로필 확인 완료.\x1b[0m`);
+    }
+  }
+
   const importedIssues = JSON.parse(fs.readFileSync(jsonFilePath, 'utf-8'));
   console.log(`\x1b[34m[Import] 외부 분석 결과 '${jsonFilePath}' 로드 완료. (이슈: ${importedIssues.length}개)\x1b[0m`);
 
-  // 가상의 sourceFiles 정보 (적재 로직 호환용)
-  const sourceFiles = Array.from(new Set(importedIssues.map(i => i.file_path))).map(path => ({ relPath: path }));
+  let activeProjectId = projectId;
+  const isUuid = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
-  await uploadIssuesToSupabase(projectId, ownerId, sourceFiles, importedIssues, dbHeaders);
+  if (!activeProjectId || !isUuid(activeProjectId)) {
+    const targetName = activeProjectId || path.basename(path.resolve('.')) || 'Imported Project';
+    console.log(`\x1b[34m[Project] '${targetName}' 기반 자동 매핑 시도...\x1b[0m`);
+    
+    activeProjectId = null; // 리셋 후 검색
+
+    // 기존 프로젝트 검색 (이름 기준)
+    const searchRes = await fetch(`${SUPABASE_URL}/rest/v1/projects?name=eq.${encodeURIComponent(targetName)}`, {
+      method: 'GET',
+      headers: dbHeaders
+    });
+    
+    if (searchRes.ok) {
+      const projs = await searchRes.json();
+      if (projs && projs.length > 0) {
+        activeProjectId = projs[0].id;
+        console.log(`\x1b[32m- 기존 프로젝트 매핑 완료 (ID: ${activeProjectId})\x1b[0m`);
+      }
+    }
+
+    if (!activeProjectId) {
+      activeProjectId = crypto.randomUUID();
+      console.log(`\x1b[34m- 새 프로젝트 생성 중... (이름: ${targetName}, ID: ${activeProjectId})\x1b[0m`);
+      const projCreateRes = await fetch(`${SUPABASE_URL}/rest/v1/projects`, {
+        method: 'POST',
+        headers: dbHeaders,
+        body: JSON.stringify({
+          id: activeProjectId,
+          name: targetName,
+          description: 'Imported via Gemini CLI Hybrid Workflow',
+          owner_id: ownerId,
+          language: 'Mixed',
+          status: 'active'
+        })
+      });
+      if (!projCreateRes.ok) {
+        const err = await projCreateRes.text();
+        console.error('\x1b[31m- [Error] 프로젝트 생성 실패:\x1b[0m', err);
+        process.exit(1);
+      }
+    }
+  }
+
+  const sourceFiles = Array.from(new Set(importedIssues.map(i => i.file_path))).map(path => ({ relPath: path }));
+  await uploadIssuesToSupabase(activeProjectId, ownerId, sourceFiles, importedIssues, dbHeaders);
 };
 
 // ----------------------------------------------------
@@ -716,20 +792,30 @@ const main = () => {
   const args = process.argv.slice(2);
   const command = args[0];
 
+  if (!command) {
+    printHelp();
+    process.exit(0);
+  }
+
+  const getArgValue = (flag) => {
+    const idx = args.indexOf(flag);
+    return (idx !== -1 && args[idx + 1]) ? args[idx + 1] : null;
+  };
+
   if (command === 'login') {
     handleLogin();
   } else if (command === 'analyze') {
-    const targetPath = args[1];
-    const projectId = args[2];
-    handleAnalyze(targetPath, projectId);
+    const targetPath = args[1] || '.';
+    const projectId = getArgValue('--project') || args[2];
+    handleAnalyze(targetPath, (projectId && projectId.startsWith('--')) ? null : projectId);
   } else if (command === 'import') {
     const jsonPath = args[1];
-    const projectId = args[2];
-    if (!jsonPath || !projectId) {
-      console.log('사용법: node bin/code-eye.js import <issues.json> <project_id>');
+    const projectId = getArgValue('--project') || args[2];
+    if (!jsonPath) {
+      console.log('사용법: node bin/code-eye.js import <issues.json> [--project <id>]');
       process.exit(1);
     }
-    handleImport(jsonPath, projectId);
+    handleImport(jsonPath, (projectId && projectId.startsWith('--')) ? null : projectId);
   } else {
     printHelp();
   }

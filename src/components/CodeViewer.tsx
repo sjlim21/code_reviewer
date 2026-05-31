@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   type Issue, 
   type IssueComment, 
@@ -30,18 +30,20 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
   onClose,
   onUpdateStatus
 }) => {
-  const [comments, setComments] = useState<IssueComment[]>([]);
   const [newCommentText, setNewCommentText] = useState('');
+  const [commentTrigger, setCommentTrigger] = useState(0);
 
-  
+  const comments = useMemo(() => {
+    if (!issue) return [];
+    // Reference commentTrigger to satisfy exhaustive-deps lint rule
+    void commentTrigger;
+    return mockComments.filter(c => c.issue_id === issue.id);
+  }, [issue, commentTrigger]);
+
   const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (issue) {
-      // 해당 이슈에 달린 댓글 로드
-      const issueComments = mockComments.filter(c => c.issue_id === issue.id);
-      setComments(issueComments);
-      
       // Prism 하이라이트 트리거
       setTimeout(() => {
         Prism.highlightAll();
@@ -67,8 +69,9 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
       created_at: new Date().toISOString()
     };
 
-    setComments(prev => [...prev, newComment]);
+    mockComments.push(newComment);
     setNewCommentText('');
+    setCommentTrigger(prev => prev + 1);
   };
 
 

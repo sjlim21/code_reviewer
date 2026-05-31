@@ -1,0 +1,67 @@
+[
+  {
+    "title": "Model Name Hallucination / Future Reference",
+    "description": "API call targets 'gemini-3.5-flash', which is not a currently available Gemini model. This will cause HTTP 404 or 400 errors in production.",
+    "suggestion": "### AS-IS\n```typescript\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;\n```\n### TO-BE\n```typescript\n// Use gemini-1.5-flash or gemini-2.0-flash-exp for stable current versions\nurl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;\n```",
+    "rule_id": "bug/invalid-model-name",
+    "severity": "critical",
+    "category": "bug",
+    "priority_score": 100,
+    "file_path": "src/geminiAnalyzer.ts",
+    "line_start": 35,
+    "line_end": 40,
+    "code_snippet": "url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;"
+  },
+  {
+    "title": "Sensitive API Keys in LocalStorage",
+    "description": "Supabase keys and Gemini API keys are persisted in plain text in LocalStorage. This makes the application vulnerable to credential theft via Cross-Site Scripting (XSS).",
+    "suggestion": "### AS-IS\n```typescript\nconst localKey = localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY);\n```\n### TO-BE\n```typescript\n// Avoid persisting sensitive keys in LocalStorage.\n// Use HttpOnly cookies or keep keys in memory via state management if they must be dynamic.\n```",
+    "rule_id": "security/plaintext-credential-storage",
+    "severity": "critical",
+    "category": "security",
+    "priority_score": 88,
+    "file_path": "src/supabase.ts",
+    "line_start": 4,
+    "line_end": 21,
+    "code_snippet": "export const STORAGE_KEYS = {\n  SUPABASE_URL: 'code_eye_supabase_url',\n  SUPABASE_ANON_KEY: 'code_eye_supabase_anon_key',\n  GEMINI_API_KEY: 'code_eye_gemini_api_key'\n};"
+  },
+  {
+    "title": "Sequential Network Request Bottleneck",
+    "description": "Code analysis is performed sequentially within a loop using 'await'. For projects with many files, this leads to linear scaling of latency and poor user experience.",
+    "suggestion": "### AS-IS\n```typescript\nfor (let i = 0; i < filesToAnalyze.length; i++) {\n  const detectedIssues = await analyzeCodeWithGemini(...);\n  allDetectedIssues.push(...detectedIssues);\n}\n```\n### TO-BE\n```typescript\n// Use Promise.all with a concurrency limit\nconst results = await Promise.all(batch.map(file => analyzeCodeWithGemini(...)));\n```",
+    "rule_id": "performance/sequential-async-calls",
+    "severity": "high",
+    "category": "performance",
+    "priority_score": 52,
+    "file_path": "src/components/Uploader.tsx",
+    "line_start": 123,
+    "line_end": 154,
+    "code_snippet": "for (let i = 0; i < filesToAnalyze.length; i++) {\n  const detectedIssues = await analyzeCodeWithGemini(...);\n  allDetectedIssues.push(...detectedIssues);\n}"
+  },
+  {
+    "title": "Non-Atomic Database Operations",
+    "description": "Project creation and analysis run insertion are separate network calls without transactional integrity.",
+    "suggestion": "### AS-IS\n```typescript\nawait supabase.from('projects').insert(...);\nawait supabase.from('analysis_runs').insert(...);\n```\n### TO-BE\n```typescript\n// Use Supabase RPC to wrap updates in a Postgres transaction.\n```",
+    "rule_id": "bug/non-atomic-updates",
+    "severity": "medium",
+    "category": "bug",
+    "priority_score": 43,
+    "file_path": "src/components/Uploader.tsx",
+    "line_start": 165,
+    "line_end": 207,
+    "code_snippet": "const { error: insertProjError } = await supabase.from('projects').insert(newProj);"
+  },
+  {
+    "title": "Inaccurate Priority Score Formula",
+    "description": "Priority score uses Math.random() instead of weighted scientific formula.",
+    "suggestion": "### AS-IS\n```typescript\nconst offset = Math.floor(Math.random() * 10);\n```\n### TO-BE\n```typescript\nconst score = ((severity * 0.6) + (impact * 0.3) + (likelihood * 0.1)) * 10;\n```",
+    "rule_id": "logic/incorrect-priority-algorithm",
+    "severity": "medium",
+    "category": "performance",
+    "priority_score": 40,
+    "file_path": "src/geminiAnalyzer.ts",
+    "line_start": 15,
+    "line_end": 24,
+    "code_snippet": "const offset = Math.floor(Math.random() * 10);"
+  }
+]

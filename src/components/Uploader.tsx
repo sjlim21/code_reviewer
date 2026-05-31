@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { FolderOpen, FileCode, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { getSupabaseClient, type Issue, type Project } from '../supabase';
 import { analyzeCodeWithGemini } from '../geminiAnalyzer';
+import { type Session } from '@supabase/supabase-js';
 
 interface UploaderProps {
   selectedProject: Project | null;
   onAnalysisComplete: (newIssues: Issue[]) => void;
-  session?: any;
+  session?: Session | null;
   projects?: Project[];
   onProjectCreated?: (newProj: Project) => void;
   onProjectSelected?: (proj: Project) => void;
@@ -37,11 +38,16 @@ export const Uploader: React.FC<UploaderProps> = ({
   } as React.InputHTMLAttributes<HTMLInputElement>;
 
   const performFolderAnalysis = async (allFiles: FileList) => {
-    // 1. 지원 가능한 다국어 소스코드 확장자 파일 필터링
+    // 1. 지원 가능한 다국어 소스코드 확장자 파일 필터링 (2MB 이하 크기 제한 추가)
     const SUPPORTED_EXTENSIONS = ['.c', '.cpp', '.h', '.cs', '.java', '.py', '.go', '.js', '.jsx', '.ts', '.tsx'];
     const filesToAnalyze = Array.from(allFiles).filter(file => {
       const name = file.name.toLowerCase();
-      return SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext));
+      const isSupported = SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext));
+      if (isSupported && file.size > 2 * 1024 * 1024) {
+        console.warn(`File ${file.name} exceeds 2MB limit and was excluded from analysis.`);
+        return false;
+      }
+      return isSupported;
     });
 
     if (filesToAnalyze.length === 0) {
@@ -66,6 +72,9 @@ export const Uploader: React.FC<UploaderProps> = ({
       }
 
       const supabase = getSupabaseClient();
+      if (supabase && !session?.user?.id) {
+        throw new Error("분석을 수행하려면 로그인 세션이 필요합니다.");
+      }
       let activeProjId = selectedProject?.id || '';
 
       // 3. 폴더명 기반 프로젝트 자동 매핑 / 생성
@@ -85,7 +94,7 @@ export const Uploader: React.FC<UploaderProps> = ({
           id: newProjId,
           name: folderName,
           description: `로컬 폴더 '${folderName}' 선택을 통해 자동 매핑된 프로젝트`,
-          owner_id: session?.user?.id || 'usr-1',
+          owner_id: session?.user?.id || 'demo-user',
           language: mainLanguage,
           repo_url: 'https://github.com',
           status: 'active',
@@ -109,7 +118,7 @@ export const Uploader: React.FC<UploaderProps> = ({
           id: `prj-${Date.now()}`,
           name: folderName,
           description: `[데모] 로컬 폴더 '${folderName}' 기반 가상 프로젝트`,
-          owner_id: 'usr-1',
+          owner_id: 'demo-user',
           language: 'Multi',
           repo_url: 'https://github.com',
           status: 'active',
@@ -131,7 +140,7 @@ export const Uploader: React.FC<UploaderProps> = ({
           .insert({
             id: runId,
             project_id: activeProjId,
-            triggered_by: session?.user?.id || 'usr-1',
+            triggered_by: session?.user?.id || 'demo-user',
             status: 'running',
             source_type: 'upload',
             total_files: filesToAnalyze.length,
@@ -143,25 +152,18 @@ export const Uploader: React.FC<UploaderProps> = ({
       setUploadStatus('analyzing');
       const allDetectedIssues: Issue[] = [];
 
-      // 5. 각 소스코드 파일 순차 스캔 루프 돌기
-      for (let i = 0; i < filesToAnalyze.length; i++) {
-        const file = filesToAnalyze[i];
-        setCurrentFileIndex(i + 1);
-        setCurrentScanningFile(file.name);
-        
-        // 현재 파일의 진행도 갱신 (30% ~ 85%)
-        const currentProgress = 30 + Math.floor((i / filesToAnalyze.length) * 55);
-        setProgress(currentProgress);
-
-        // 파일 텍스트 추출
-        const codeContent = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string || '');
-          reader.onerror = (err) => reject(err);
-          reader.readAsText(file);
-        });
-
+      // 5. 각 소스코드 파일 동시 스캔 루프 (최대 4개 동시 진행)
+      let completedCount = 0;
+      const scanFile = async (file: File) => {
         try {
+          // 파일 텍스트 추출
+          const codeContent = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string || '');
+            reader.onerror = (err) => reject(err);
+            reader.readAsText(file);
+          });
+
           // 주입받은 Google OAuth Access Token 사용 (메모리 보관으로 보안 강화)
           const activeToken = googleToken || '';
 
@@ -176,8 +178,31 @@ export const Uploader: React.FC<UploaderProps> = ({
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {
           console.warn(`File analysis failed for ${file.name}, skipping.`, scanErr);
+        } finally {
+          completedCount++;
+          setCurrentFileIndex(completedCount);
+          setCurrentScanningFile(file.name);
+          
+          // 현재 파일의 진행도 갱신 (30% ~ 85%)
+          const currentProgress = 30 + Math.floor((completedCount / filesToAnalyze.length) * 55);
+          setProgress(currentProgress);
+        }
+      };
+
+      const concurrencyLimit = 4;
+      const executing = new Set<Promise<void>>();
+
+      for (const file of filesToAnalyze) {
+        const p: Promise<void> = scanFile(file).then(() => {
+          executing.delete(p);
+        });
+        executing.add(p);
+
+        if (executing.size >= concurrencyLimit) {
+          await Promise.race(executing);
         }
       }
+      await Promise.all(executing);
 
       setProgress(85);
       setCurrentScanningFile('Supabase DB 결과 갱신 중...');
@@ -251,9 +276,10 @@ export const Uploader: React.FC<UploaderProps> = ({
       setUploadStatus('done');
       onAnalysisComplete(allDetectedIssues);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Folder analysis pipeline error:", err);
-      setErrorMsg(err.message || '폴더 분석 수행 중 오류가 발생했습니다.');
+      const errorMessage = err instanceof Error ? err.message : '폴더 분석 수행 중 오류가 발생했습니다.';
+      setErrorMsg(errorMessage);
       setUploadStatus('idle');
     }
   };

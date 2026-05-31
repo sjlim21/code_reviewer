@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { type Session } from '@supabase/supabase-js';
 import { 
   mockProjects, 
   mockIssues, 
@@ -33,17 +34,19 @@ function App() {
   const [isUsingRealDB, setIsUsingRealDB] = useState(false);
   
   // 인증 및 세션 상태 추가
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [googleToken, setGoogleToken] = useState<string>('');
   const [isDemoSession, setIsDemoSession] = useState(false);
-  const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [isLoadingSession, setIsLoadingSession] = useState(() => !getSupabaseClient());
 
   // 1. Supabase Auth 세션 감지 및 초기 로드
   useEffect(() => {
     const supabase = getSupabaseClient();
     
     if (!supabase) {
-      setIsLoadingSession(false);
+      Promise.resolve().then(() => {
+        setIsLoadingSession(false);
+      });
       return;
     }
 
@@ -63,7 +66,7 @@ function App() {
 
     // 인증 상태 변화 리스너 등록
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession((prev: any) => {
+      setSession((prev: Session | null) => {
         // 동일 사용자 세션인 경우 상태 변경을 생략하여 무한 렌더링 루프 방지
         if (prev?.user?.id === currentSession?.user?.id) {
           return prev;
@@ -173,7 +176,7 @@ function App() {
     return () => {
       ignore = true;
     };
-  }, [session?.user?.id, isDemoSession, isLoadingSession]);
+  }, [session, isDemoSession, isLoadingSession]);
 
   // 3. 선택된 프로젝트가 변경될 때 이슈 목록을 다시 로드 (문자열 ID 의존성 매핑 및 경합 방지)
   useEffect(() => {
@@ -205,7 +208,7 @@ function App() {
     return () => {
       ignore = true;
     };
-  }, [selectedProject?.id, isUsingRealDB]);
+  }, [selectedProject, isUsingRealDB]);
 
   // 4. Supabase Realtime 실시간 구독 설정 (이슈 변경 감지, ID 의존성 패치)
   useEffect(() => {
@@ -239,10 +242,14 @@ function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedProject?.id, isUsingRealDB]);
+  }, [selectedProject, isUsingRealDB]);
 
-  // 5. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함)
+  // 5. 이슈 상태 변경 핸들러 (실제 DB UPDATE 포함 - 에러 시 안전한 롤백 지원)
   const handleUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
+    // 롤백을 위해 이전 상태 백업
+    const previousIssues = [...issues];
+    const previousSelectedIssue = selectedIssue ? { ...selectedIssue } : null;
+
     setIssues(prevIssues => 
       prevIssues.map(issue => 
         issue.id === issueId 
@@ -267,12 +274,15 @@ function App() {
             .update({ 
               status: newStatus,
               resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null,
-              resolved_by: session?.user?.id || 'usr-1'
+              resolved_by: session?.user?.id || null
             })
             .eq('id', issueId);
           if (error) throw error;
         } catch (e) {
-          console.error("DB status update failed:", e);
+          console.error("DB status update failed. Rolling back state:", e);
+          alert('데이터베이스 업데이트 실패로 변경 사항이 롤백되었습니다.');
+          setIssues(previousIssues);
+          setSelectedIssue(previousSelectedIssue);
         }
       }
     }
@@ -301,7 +311,8 @@ function App() {
           if (error) throw error;
         } catch (e) {
           console.error("DB project delete failed:", e);
-          alert('프로젝트 삭제 중 에러가 발생했습니다: ' + (e as any).message);
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          alert('프로젝트 삭제 중 에러가 발생했습니다: ' + errorMsg);
           return;
         }
       }

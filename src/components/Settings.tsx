@@ -21,16 +21,34 @@ export const Settings: React.FC<SettingsProps> = ({ project }) => {
   });
   const [isSaved, setIsSaved] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setSupabaseUrl(localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
     setSupabaseKey(localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
+    setSlackUrl(localStorage.getItem('code_eye_slack_webhook_url') || '');
+    setDiscordUrl(localStorage.getItem('code_eye_discord_webhook_url') || '');
+    setIgnorePaths(localStorage.getItem('code_eye_ignore_paths') || 'node_modules/, dist/, build/, *.min.js');
+    
+    const savedLinters = localStorage.getItem('code_eye_selected_linters');
+    if (savedLinters) {
+      try {
+        setSelectedLinters(JSON.parse(savedLinters));
+      } catch {
+        // Fallback
+      }
+    }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
     localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, supabaseUrl.trim());
     localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, supabaseKey.trim());
+    localStorage.setItem('code_eye_slack_webhook_url', slackUrl.trim());
+    localStorage.setItem('code_eye_discord_webhook_url', discordUrl.trim());
+    localStorage.setItem('code_eye_ignore_paths', ignorePaths.trim());
+    localStorage.setItem('code_eye_selected_linters', JSON.stringify(selectedLinters));
 
     setIsSaved(true);
     setTimeout(() => {

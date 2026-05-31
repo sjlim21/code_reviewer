@@ -29,6 +29,22 @@ import {
   Cell
 } from 'recharts';
 
+const severityColors: { [key: string]: string } = {
+  critical: '#f43f5e', // Rose 500
+  high: '#f97316',     // Orange 500
+  medium: '#eab308',   // Yellow 500
+  low: '#3b82f6',      // Blue 500
+  info: '#64748b'      // Slate 500
+};
+
+const severityGlows: { [key: string]: string } = {
+  critical: 'hover:shadow-[0_0_20px_0_rgba(244,63,94,0.35)]',
+  high: 'hover:shadow-[0_0_20px_0_rgba(249,115,22,0.30)]',
+  medium: 'hover:shadow-[0_0_20px_0_rgba(234,179,8,0.25)]',
+  low: 'hover:shadow-[0_0_20px_0_rgba(59,130,246,0.25)]',
+  info: 'hover:shadow-[0_0_20px_0_rgba(100,116,139,0.20)]'
+};
+
 interface DashboardProps {
   selectedProject: Project | null;
   onSelectProject: (project: Project) => void;
@@ -60,8 +76,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // 검색 및 필터 필터링
   const filteredIssues = useMemo(() => {
     return projectIssues.filter(issue => {
-      const matchesSearch = issue.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            issue.file_path.toLowerCase().includes(searchTerm.toLowerCase());
+      const issueTitle = issue.title || '';
+      const issueFilePath = issue.file_path || '';
+      const matchesSearch = issueTitle.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            issueFilePath.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesSeverity = severityFilter === 'all' ? true : issue.severity === severityFilter;
       const matchesCategory = categoryFilter === 'all' ? true : issue.category === categoryFilter;
       const matchesStatus = statusFilter === 'all' ? true : issue.status === statusFilter;
@@ -85,7 +103,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [projectIssues]);
 
   // 차트 데이터 (임시 트렌드 및 분포 데이터 구성)
-  const chartTrendData = [
+  const chartTrendData = useMemo(() => [
     { name: '05-24', issues: 5 },
     { name: '05-25', issues: 8 },
     { name: '05-26', issues: 12 },
@@ -93,7 +111,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     { name: '05-28', issues: 15 },
     { name: '05-29', issues: 14 },
     { name: '05-30', issues: projectIssues.length },
-  ];
+  ], [projectIssues.length]);
 
   const chartCategoryData = useMemo(() => {
     const categories: { [key: string]: number } = {};
@@ -102,22 +120,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
     return Object.entries(categories).map(([name, value]) => ({ name, value }));
   }, [projectIssues]);
-
-  const severityColors: { [key: string]: string } = {
-    critical: '#f43f5e', // Rose 500
-    high: '#f97316',     // Orange 500
-    medium: '#eab308',   // Yellow 500
-    low: '#3b82f6',      // Blue 500
-    info: '#64748b'      // Slate 500
-  };
-
-  const severityGlows: { [key: string]: string } = {
-    critical: 'hover:shadow-[0_0_20px_0_rgba(244,63,94,0.35)]',
-    high: 'hover:shadow-[0_0_20px_0_rgba(249,115,22,0.30)]',
-    medium: 'hover:shadow-[0_0_20px_0_rgba(234,179,8,0.25)]',
-    low: 'hover:shadow-[0_0_20px_0_rgba(59,130,246,0.25)]',
-    info: 'hover:shadow-[0_0_20px_0_rgba(100,116,139,0.20)]'
-  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

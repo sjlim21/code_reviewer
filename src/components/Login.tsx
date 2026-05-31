@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getSupabaseClient } from '../supabase';
 import { Terminal, Key, AlertCircle } from 'lucide-react';
 
@@ -9,8 +9,17 @@ interface LoginProps {
 export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleGithubLogin = async () => {
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const handleGoogleLogin = async () => {
     setIsLoading(true);
     setErrorMsg('');
     
@@ -18,7 +27,7 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
     
     if (!supabase) {
       console.warn("Supabase configuration missing. Falling back to offline demo mode login.");
-      setTimeout(() => {
+      timerRef.current = setTimeout(() => {
         setIsLoading(false);
         onMockLogin();
       }, 1000);
@@ -38,9 +47,10 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
         }
       });
       if (error) throw error;
-    } catch (err: any) {
+    } catch (err) {
       console.error("OAuth login request failed:", err);
-      setErrorMsg(err.message || 'Google 로그인 요청 중 오류가 발생했습니다.');
+      const message = err instanceof Error ? err.message : 'Google 로그인 요청 중 오류가 발생했습니다.';
+      setErrorMsg(message);
       setIsLoading(false);
     }
   };
@@ -87,7 +97,7 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
 
         {/* Google sign-in button */}
         <button
-          onClick={handleGithubLogin}
+          onClick={handleGoogleLogin}
           disabled={isLoading}
           className="w-full bg-[#4285f4] hover:bg-[#357ae8] text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-3 transition-all duration-300 shadow-lg active:scale-[0.98]"
         >
