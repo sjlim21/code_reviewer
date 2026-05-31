@@ -239,9 +239,10 @@ const handleLogin = async () => {
             if (hash) {
               const params = new URLSearchParams(hash.replace('#', '?'));
               const accessToken = params.get('access_token');
+              const refreshToken = params.get('refresh_token');
               const providerToken = params.get('provider_token');
               if (accessToken) {
-                fetch('/save-token?access_token=' + encodeURIComponent(accessToken) + '&provider_token=' + encodeURIComponent(providerToken || ''))
+                fetch('/save-token?access_token=' + encodeURIComponent(accessToken) + '&provider_token=' + encodeURIComponent(providerToken || '') + '&refresh_token=' + encodeURIComponent(refreshToken || ''))
                   .then(() => {
                     document.body.innerHTML = '<h1 style="color: #10b981;">인증 완벽 성공!</h1><p>이 웹 페이지 창을 닫고 터미널 창으로 돌아가 주셔도 안전합니다.</p>';
                   })
@@ -259,6 +260,7 @@ const handleLogin = async () => {
     } else if (pathname === '/save-token') {
       const accessToken = parsedUrl.searchParams.get('access_token') || '';
       const providerToken = parsedUrl.searchParams.get('provider_token') || '';
+      const refreshToken = parsedUrl.searchParams.get('refresh_token') || '';
 
       if (accessToken) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -267,6 +269,7 @@ const handleLogin = async () => {
         fs.writeFileSync(CONFIG_PATH, JSON.stringify({
           ...currentConfig,
           supabase_access_token: accessToken,
+          supabase_refresh_token: refreshToken,
           google_provider_token: providerToken,
           saved_at: new Date().toISOString()
         }, null, 2));
@@ -326,6 +329,91 @@ const handleLogin = async () => {
       // 브라우저 팝업 실패 시 수동 접속용 로그 유지
     }
   });
+};
+
+const refreshSessionIfNeeded = async () => {
+  if (!fs.existsSync(CONFIG_PATH)) return false;
+
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')) || {};
+  } catch (e) {
+    return false;
+  }
+
+  const supabaseToken = config.supabase_access_token;
+  const refreshToken = config.supabase_refresh_token;
+
+  if (!supabaseToken) return false;
+
+  // Check if token is expired or close to expiring (within 5 minutes)
+  let isExpired = false;
+  try {
+    const payloadBase64 = supabaseToken.split('.')[1];
+    if (payloadBase64) {
+      const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+      if (decoded && decoded.exp) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        // Expired if current time + 300 seconds (5 min) >= exp
+        if (currentTime + 300 >= decoded.exp) {
+          isExpired = true;
+        }
+      }
+    }
+  } catch (e) {
+    isExpired = true;
+  }
+
+  if (!isExpired) {
+    return true; // Token is still valid
+  }
+
+  if (!refreshToken) {
+    console.log('\n\x1b[33m[Session] 세션이 만료되었으나 갱신 토큰(Refresh Token)이 없습니다. 다시 로그인해 주세요.\x1b[0m');
+    return false;
+  }
+
+  console.log('\x1b[34m[Session] 세션 만료가 감지되어 자동으로 토큰을 갱신하는 중...\x1b[0m');
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('\x1b[33m- [Warning] 자동 세션 갱신 실패:\x1b[0m', errText);
+      return false;
+    }
+
+    const data = await res.json();
+    if (data.access_token) {
+      const currentConfig = loadSessionConfig();
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        ...currentConfig,
+        supabase_access_token: data.access_token,
+        supabase_refresh_token: data.refresh_token || refreshToken,
+        google_provider_token: data.provider_token || currentConfig.google_provider_token || '',
+        saved_at: new Date().toISOString()
+      }, null, 2));
+
+      // Update in-memory values
+      SUPABASE_URL = currentConfig.supabase_url || SUPABASE_URL;
+      SUPABASE_ANON_KEY = currentConfig.supabase_anon_key || SUPABASE_ANON_KEY;
+
+      console.log('\x1b[32m- 세션이 자동으로 정상 갱신되었습니다.\x1b[0m');
+      return true;
+    }
+  } catch (err) {
+    console.error('\x1b[31m[Error] 세션 자동 갱신 중 에러 발생:\x1b[0m', err instanceof Error ? err.message : String(err));
+  }
+
+  return false;
 };
 
 // ----------------------------------------------------
@@ -492,6 +580,12 @@ const deduplicateIssues = (aiIssues, linterIssues) => {
 const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
   await ensureSupabaseCredentials();
 
+  const sessionValid = await refreshSessionIfNeeded();
+  if (!sessionValid) {
+    console.error('\x1b[31m[Error] 로그인 세션이 없거나 만료되었습니다. 먼저 "node bin/code-eye.js login" 명령을 실행해 주세요.\x1b[0m');
+    process.exit(1);
+  }
+
   let supabaseToken = '';
   let googleToken = '';
 
@@ -501,11 +595,6 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
       supabaseToken = config.supabase_access_token || '';
       googleToken = config.google_provider_token || '';
     } catch (e) {}
-  }
-
-  if (!supabaseToken) {
-    console.error('\x1b[31m[Error] 로그인 세션이 부재합니다. 먼저 "node bin/code-eye.js login" 명령을 실행해 주세요.\x1b[0m');
-    process.exit(1);
   }
 
   let ownerId = 'usr-1';
@@ -711,16 +800,17 @@ const handleImport = async (jsonFilePath, projectId) => {
   }
 
   await ensureSupabaseCredentials();
+
+  const sessionValid = await refreshSessionIfNeeded();
+  if (!sessionValid) {
+    console.error('\x1b[31m[Error] 로그인 세션이 없거나 만료되었습니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
+    process.exit(1);
+  }
   
   // 환경변수 우선, 없으면 파일 로드
   const config = fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')) : {};
   const supabaseToken = process.env.SUPABASE_ACCESS_TOKEN || config.supabase_access_token || '';
   const googleToken = config.google_provider_token || '';
-
-  if (!supabaseToken) {
-    console.error('\x1b[31m[Error] 로그인 세션이 부재합니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
-    process.exit(1);
-  }
 
   let ownerId = 'usr-1';
   try {
