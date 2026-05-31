@@ -11,7 +11,9 @@ import {
   Send, 
   ShieldAlert, 
   X,
-  Sparkles
+  Sparkles,
+  Columns,
+  Rows
 } from 'lucide-react';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
@@ -32,6 +34,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
 }) => {
   const [newCommentText, setNewCommentText] = useState('');
   const [commentTrigger, setCommentTrigger] = useState(0);
+  const [viewMode, setViewMode] = useState<'split' | 'stacked'>('split');
 
   const comments = useMemo(() => {
     if (!issue) return [];
@@ -49,7 +52,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
         Prism.highlightAll();
       }, 50);
     }
-  }, [issue]);
+  }, [issue, viewMode]);
 
   useEffect(() => {
     commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -121,55 +124,87 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
 
           {/* Code snippets & Compare */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <ShieldAlert className="text-red-400" size={16} />
-              검출된 취약 코드 원문 (AS-IS)
-            </h3>
-            <div className="rounded-xl overflow-hidden border border-slate-800/60 bg-slate-950">
-              <div className="bg-slate-900 px-4 py-2 text-xs text-slate-500 font-mono border-b border-slate-800/60">
-                {issue.file_path}
+            <div className="flex items-center justify-between bg-slate-950/40 p-3 rounded-xl border border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="text-red-400" size={16} />
+                <span className="text-xs font-semibold text-slate-200">코드 변경 사항 비교</span>
               </div>
-              <pre className="p-4 overflow-x-auto text-xs m-0">
-                <code className={`language-${issue.file_path.endsWith('.py') ? 'python' : 'typescript'}`}>
-                  {issue.code_snippet}
-                </code>
-              </pre>
-            </div>
-          </div>
-
-          {/* AI Suggestion Section */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                <Sparkles className="text-indigo-400" size={16} />
-                AI 개선 가이드 (TO-BE Suggestion)
-              </h3>
               
-              {/* Fix button - 보안 권고로 인한 비활성화 */}
-              {issue.status !== 'resolved' && (
+              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800/60">
                 <button
-                  disabled={true}
-                  className="bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                  title="보안 권고: 구문 손상 방지 및 안전한 코드 검토를 위해 코드 자동 수정 기능이 완전히 비활성화되었습니다."
+                  type="button"
+                  onClick={() => setViewMode('split')}
+                  className={`px-3 py-1.5 rounded-md text-[10px] flex items-center gap-1.5 transition-all duration-200 font-bold ${
+                    viewMode === 'split' 
+                      ? 'bg-indigo-600 text-white shadow-md' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="나란히 보기 (Split View)"
                 >
-                  <GitCommit size={14} />
-                  자동 수정 비활성화됨
+                  <Columns size={12} />
+                  <span>Split View</span>
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setViewMode('stacked')}
+                  className={`px-3 py-1.5 rounded-md text-[10px] flex items-center gap-1.5 transition-all duration-200 font-bold ${
+                    viewMode === 'stacked' 
+                      ? 'bg-indigo-600 text-white shadow-md' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="위아래로 보기 (Stacked View)"
+                >
+                  <Rows size={12} />
+                  <span>Stacked View</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div className="rounded-xl overflow-hidden border border-slate-800/60 bg-slate-950">
-                <div className="bg-indigo-950/20 px-4 py-2 text-xs text-indigo-400 font-semibold border-b border-slate-800/60 flex items-center gap-2">
-                  <Sparkles size={12} />
-                  Claude-3.5-Sonnet 자동 개선 코드 제안
+            <div className={viewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : 'space-y-4'}>
+              {/* AS-IS (Vulnerable original) */}
+              <div className="rounded-xl overflow-hidden border border-slate-800/60 bg-slate-950 flex flex-col h-full min-h-[220px]">
+                <div className="bg-slate-900/60 px-4 py-2 text-xs text-slate-400 font-mono border-b border-slate-800/60 flex items-center justify-between">
+                  <span>AS-IS (취약 코드 원문)</span>
+                  <span className="text-[9px] text-rose-400 font-bold uppercase tracking-wider bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Vulnerable</span>
                 </div>
-                <pre className="p-4 overflow-x-auto text-xs m-0">
+                <pre className="p-4 overflow-x-auto text-xs m-0 flex-1 bg-slate-950">
+                  <code className={`language-${issue.file_path.endsWith('.py') ? 'python' : 'typescript'}`}>
+                    {issue.code_snippet}
+                  </code>
+                </pre>
+              </div>
+
+              {/* TO-BE (AI suggestion) */}
+              <div className="rounded-xl overflow-hidden border border-indigo-900/40 bg-slate-950 flex flex-col h-full min-h-[220px]">
+                <div className="bg-indigo-950/20 px-4 py-2 text-xs text-indigo-400 font-mono border-b border-indigo-900/30 flex items-center justify-between">
+                  <span>TO-BE (자동 개선 제안)</span>
+                  <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                    <Sparkles size={9} /> Recommended
+                  </span>
+                </div>
+                <pre className="p-4 overflow-x-auto text-xs m-0 flex-1 bg-slate-950">
                   <code className={`language-${issue.file_path.endsWith('.py') ? 'python' : 'typescript'}`}>
                     {issue.suggestion}
                   </code>
                 </pre>
               </div>
+            </div>
+
+            {/* AI Security Advisory Notice / Actions */}
+            <div className="flex items-center justify-between p-4 bg-slate-950/30 border border-slate-800/80 rounded-xl gap-4">
+              <div className="text-xs text-slate-400">
+                <span className="font-semibold text-slate-300">자동 반영 권장</span>: 코드 자동 수정을 원하시면 개선안 코드를 복사하여 대상 파일에 직접 반영해 주세요.
+              </div>
+              {issue.status !== 'resolved' && (
+                <button
+                  disabled={true}
+                  className="bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed px-3.5 py-2 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all shrink-0"
+                  title="보안 권고: 구문 손상 방지 및 안전한 코드 검토를 위해 코드 자동 수정 기능이 완전히 비활성화되었습니다."
+                >
+                  <GitCommit size={12} />
+                  자동 수정 비활성화됨
+                </button>
+              )}
             </div>
           </div>
 

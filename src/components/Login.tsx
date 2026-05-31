@@ -59,8 +59,10 @@ export const Login: React.FC<LoginProps> = ({ onMockLogin }) => {
     <div className="min-h-screen bg-gradient-to-b from-[#080c14] to-[#04060a] flex items-center justify-center p-4 relative overflow-hidden font-sans">
       
       {/* Background glowing ambient light */}
-      <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-600/10 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none animate-float-auras" />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-600/10 rounded-full blur-[100px] pointer-events-none animate-float-auras-reverse" />
+      <div className="absolute top-1/2 left-2/3 w-64 h-64 bg-cyan-600/10 rounded-full blur-[90px] pointer-events-none animate-float-auras" style={{ animationDelay: '-5s' }} />
+
 
       <div className="w-full max-w-md glass-panel rounded-2xl p-8 shadow-2xl relative z-10 border border-[#26334a]/60 flex flex-col items-center text-center space-y-6">
         

@@ -68,7 +68,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('open');
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const card = e.currentTarget;
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    card.style.setProperty('--mouse-x', `${x}px`);
+    card.style.setProperty('--mouse-y', `${y}px`);
+  };
+
   // 프로젝트별 전체 이슈 리스트 필터링
+
   const projectIssues = useMemo(() => {
     if (!selectedProject) return issues;
     return issues.filter(i => i.project_id === selectedProject.id);
@@ -245,7 +255,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="lg:col-span-3 grid grid-cols-2 md:grid-cols-5 gap-4">
           
           {/* Critical Card */}
-          <div className="glass-panel rounded-2xl p-5 border-b-4 border-rose-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(244,63,94,0.25)] group">
+          <div 
+            onMouseMove={handleMouseMove}
+            style={{ '--glow-color': 'rgba(244,63,94,0.25)' } as React.CSSProperties}
+            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-rose-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(244,63,94,0.25)] group"
+          >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-rose-400 transition-colors">Critical</span>
             <div className="flex items-baseline justify-between mt-4">
               <span className="text-4xl font-extrabold text-rose-500 font-mono tracking-tight">{metrics.critical}</span>
@@ -256,7 +270,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           
           {/* High Card */}
-          <div className="glass-panel rounded-2xl p-5 border-b-4 border-orange-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(249,115,22,0.25)] group">
+          <div 
+            onMouseMove={handleMouseMove}
+            style={{ '--glow-color': 'rgba(249,115,22,0.20)' } as React.CSSProperties}
+            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-orange-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(249,115,22,0.25)] group"
+          >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-orange-400 transition-colors">High</span>
             <div className="flex items-baseline justify-between mt-4">
               <span className="text-4xl font-extrabold text-orange-500 font-mono tracking-tight">{metrics.high}</span>
@@ -267,7 +285,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Medium Card */}
-          <div className="glass-panel rounded-2xl p-5 border-b-4 border-yellow-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(234,179,8,0.20)] group">
+          <div 
+            onMouseMove={handleMouseMove}
+            style={{ '--glow-color': 'rgba(234,179,8,0.18)' } as React.CSSProperties}
+            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-yellow-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(234,179,8,0.20)] group"
+          >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-yellow-400 transition-colors">Medium</span>
             <div className="flex items-baseline justify-between mt-4">
               <span className="text-4xl font-extrabold text-yellow-500 font-mono tracking-tight">{metrics.medium}</span>
@@ -278,7 +300,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Low Card */}
-          <div className="glass-panel rounded-2xl p-5 border-b-4 border-blue-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(59,130,246,0.20)] group">
+          <div 
+            onMouseMove={handleMouseMove}
+            style={{ '--glow-color': 'rgba(59,130,246,0.18)' } as React.CSSProperties}
+            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-blue-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(59,130,246,0.20)] group"
+          >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-blue-400 transition-colors">Low</span>
             <div className="flex items-baseline justify-between mt-4">
               <span className="text-4xl font-extrabold text-blue-500 font-mono tracking-tight">{metrics.low}</span>
@@ -289,7 +315,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Resolved Card */}
-          <div className="glass-panel rounded-2xl p-5 border-b-4 border-emerald-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(16,185,129,0.25)] group col-span-2 md:col-span-1">
+          <div 
+            onMouseMove={handleMouseMove}
+            style={{ '--glow-color': 'rgba(16,185,129,0.20)' } as React.CSSProperties}
+            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-emerald-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(16,185,129,0.25)] group col-span-2 md:col-span-1"
+          >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-emerald-400 transition-colors">Resolved</span>
             <div className="flex items-baseline justify-between mt-4">
               <span className="text-4xl font-extrabold text-emerald-500 font-mono tracking-tight">{metrics.resolved}</span>

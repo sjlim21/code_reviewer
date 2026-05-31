@@ -103,3 +103,78 @@ code, pre {
   background-color: rgba(239, 68, 68, 0.08);
   border-left: 3px solid #ef4444;
 }
+
+/* Floating Aura Animations */
+@keyframes float-auras {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(50px, -80px) scale(1.2);
+  }
+  66% {
+    transform: translate(-30px, 30px) scale(0.9);
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+@keyframes float-auras-reverse {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(-60px, 50px) scale(0.85);
+  }
+  66% {
+    transform: translate(30px, -40px) scale(1.15);
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+.animate-float-auras {
+  animation: float-auras 20s ease-in-out infinite;
+}
+
+.animate-float-auras-reverse {
+  animation: float-auras-reverse 25s ease-in-out infinite;
+}
+
+/* Interactive Mouse-Following Glow Cards */
+.glow-card-interactive {
+  position: relative;
+  overflow: hidden;
+}
+
+.glow-card-interactive::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    200px circle at var(--mouse-x, 0px) var(--mouse-y, 0px),
+    var(--glow-color, rgba(99, 102, 241, 0.15)),
+    transparent 80%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.glow-card-interactive:hover::before {
+  opacity: 1;
+}
+
+.glow-card-interactive > * {
+  position: relative;
+  z-index: 10;
+}
+
+

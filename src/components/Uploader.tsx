@@ -1,8 +1,100 @@
 import React, { useState } from 'react';
-import { FolderOpen, FileCode, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { FolderOpen, FileCode, AlertCircle, CheckCircle, RefreshCw, Trash2, Play } from 'lucide-react';
 import { getSupabaseClient, type Issue, type Project } from '../supabase';
 import { analyzeCodeWithGemini } from '../geminiAnalyzer';
 import { type Session } from '@supabase/supabase-js';
+
+interface FileSystemEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+}
+
+interface FileSystemFileEntry extends FileSystemEntry {
+  file: (successCallback: (file: File) => void, errorCallback?: (error: DOMException) => void) => void;
+}
+
+interface FileSystemDirectoryEntry extends FileSystemEntry {
+  createReader: () => FileSystemDirectoryReader;
+}
+
+interface FileSystemDirectoryReader {
+  readEntries: (successCallback: (entries: FileSystemEntry[]) => void, errorCallback?: (error: DOMException) => void) => void;
+}
+
+const SUPPORTED_EXTENSIONS = ['.c', '.cpp', '.h', '.cs', '.java', '.py', '.go', '.js', '.jsx', '.ts', '.tsx'];
+
+const traverseFileTree = async (entry: FileSystemEntry, path: string = ''): Promise<File[]> => {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      fileEntry.file((file: File) => {
+        Object.defineProperty(file, 'webkitRelativePath', {
+          value: path + entry.name,
+          writable: true,
+          configurable: true
+        });
+        resolve([file]);
+      }, () => resolve([]));
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const dirReader = dirEntry.createReader();
+      const readEntries = () => {
+        dirReader.readEntries(async (entries) => {
+          if (entries.length === 0) {
+            resolve([]);
+            return;
+          }
+          const filePromises = entries.map(subEntry => traverseFileTree(subEntry, path + entry.name + '/'));
+          const filesArrays = await Promise.all(filePromises);
+          resolve(filesArrays.flat());
+        }, () => resolve([]));
+      };
+      readEntries();
+    } else {
+      resolve([]);
+    }
+  });
+};
+
+const formatFileSize = (bytes: number) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+const getLanguageFromExtension = (filename: string) => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'c': return 'C';
+    case 'cpp':
+    case 'cc':
+    case 'h': return 'C/C++';
+    case 'cs': return 'C#';
+    case 'java': return 'Java';
+    case 'py': return 'Python';
+    case 'go': return 'Go';
+    case 'js':
+    case 'jsx': return 'JavaScript';
+    case 'ts':
+    case 'tsx': return 'TypeScript';
+    default: return 'Unknown';
+  }
+};
+
+const getValidationStatus = (file: File) => {
+  const name = file.name.toLowerCase();
+  const isSupported = SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext));
+  if (!isSupported) {
+    return { valid: false, reason: 'Unsupported Lang' };
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return { valid: false, reason: 'Exceeds 2MB' };
+  }
+  return { valid: true, reason: 'Ready' };
+};
 
 interface UploaderProps {
   selectedProject: Project | null;
@@ -29,6 +121,51 @@ export const Uploader: React.FC<UploaderProps> = ({
   const [totalFilesCount, setTotalFilesCount] = useState(0);
   const [currentScanningFile, setCurrentScanningFile] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    setErrorMsg('');
+
+    const items = e.dataTransfer.items;
+    if (items && items.length > 0) {
+      const promises: Promise<File[]>[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          if (typeof item.webkitGetAsEntry === 'function') {
+            const entry = item.webkitGetAsEntry();
+            if (entry) {
+              promises.push(traverseFileTree(entry));
+            }
+          } else {
+            const file = item.getAsFile();
+            if (file) {
+              promises.push(Promise.resolve([file]));
+            }
+          }
+        }
+      }
+      const filesArrays = await Promise.all(promises);
+      const allFiles = filesArrays.flat();
+      if (allFiles.length > 0) {
+        setStagedFiles(allFiles);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setStagedFiles(Array.from(e.dataTransfer.files));
+    }
+  };
 
   // webkitdirectory 속성이 동작할 수 있도록 커스텀 Props 타입 우회
   const inputProps = {
@@ -37,21 +174,15 @@ export const Uploader: React.FC<UploaderProps> = ({
     multiple: true
   } as React.InputHTMLAttributes<HTMLInputElement>;
 
-  const performFolderAnalysis = async (allFiles: FileList) => {
-    // 1. 지원 가능한 다국어 소스코드 확장자 파일 필터링 (2MB 이하 크기 제한 추가)
-    const SUPPORTED_EXTENSIONS = ['.c', '.cpp', '.h', '.cs', '.java', '.py', '.go', '.js', '.jsx', '.ts', '.tsx'];
-    const filesToAnalyze = Array.from(allFiles).filter(file => {
-      const name = file.name.toLowerCase();
-      const isSupported = SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext));
-      if (isSupported && file.size > 2 * 1024 * 1024) {
-        console.warn(`File ${file.name} exceeds 2MB limit and was excluded from analysis.`);
-        return false;
-      }
-      return isSupported;
+  const performFolderAnalysis = async (filesList: File[]) => {
+    // 1. 지원 가능한 다국어 소스코드 확장자 파일 필터링
+    const filesToAnalyze = filesList.filter(file => {
+      const status = getValidationStatus(file);
+      return status.valid;
     });
 
     if (filesToAnalyze.length === 0) {
-      setErrorMsg('선택하신 폴더 내에 지원하는 프로그래밍 언어의 소스코드 파일이 존재하지 않습니다. (C, C++, C#, Python, Go, Java, JS, TS 지원)');
+      setErrorMsg('분석 가능한 코드 파일이 존재하지 않거나 모두 2MB를 초과했습니다.');
       return;
     }
 
@@ -282,6 +413,7 @@ export const Uploader: React.FC<UploaderProps> = ({
 
       setProgress(100);
       setUploadStatus('done');
+      setStagedFiles([]);
       onAnalysisComplete(allDetectedIssues);
 
     } catch (err: unknown) {
@@ -295,7 +427,7 @@ export const Uploader: React.FC<UploaderProps> = ({
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      performFolderAnalysis(files);
+      setStagedFiles(Array.from(files));
     }
   };
 
@@ -314,36 +446,142 @@ export const Uploader: React.FC<UploaderProps> = ({
       )}
 
       {uploadStatus === 'idle' ? (
-        <div
-          className="border-2 border-dashed border-slate-800 hover:border-slate-700/80 hover:bg-slate-900/10 rounded-2xl p-10 text-center cursor-pointer transition-all duration-300"
-          onClick={() => document.getElementById('folder-input')?.click()}
-        >
-          {/* 폴더 선택 전용 Input */}
-          <input
-            id="folder-input"
-            type="file"
-            className="hidden"
-            onChange={handleFolderChange}
-            {...inputProps}
-          />
-          <div className="flex flex-col items-center gap-3">
-            <div className="p-3.5 bg-slate-900/60 rounded-xl text-indigo-400 border border-slate-800/80 shadow-[0_0_15px_0_rgba(99,102,241,0.1)]">
-              <FolderOpen size={28} />
+        stagedFiles.length > 0 ? (
+          <div className="border border-slate-800/80 rounded-2xl p-6 bg-slate-950/20 shadow-inner space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Staged Files ({stagedFiles.length})
+                </h4>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  {stagedFiles.find(f => f.webkitRelativePath)?.webkitRelativePath.split('/')[0] || 'Local Project'} 폴더 구조가 감지되었습니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStagedFiles([])}
+                className="text-[10px] text-slate-500 hover:text-rose-400 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <Trash2 size={12} />
+                Reset Staging
+              </button>
             </div>
-            <div>
-              <p className="text-xs text-slate-300 font-semibold">
-                분석할 로컬 프로젝트 폴더를 선택하세요
-              </p>
-              <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                폴더 내의 소스코드 파일들을 자동 분류하여 순차 진단하고,<br />
-                **폴더 이름을 감지하여 대시보드 프로젝트로 자동 등록**합니다.
-              </p>
+
+            {/* Staged files statistics summary */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/60 text-center">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 block">Total Files</span>
+                <span className="text-sm font-bold text-slate-300">{stagedFiles.length}</span>
+              </div>
+              <div className="bg-emerald-950/10 p-2.5 rounded-lg border border-emerald-900/20 text-center">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 block">Ready to Scan</span>
+                <span className="text-sm font-bold text-emerald-400">
+                  {stagedFiles.filter(f => getValidationStatus(f).valid).length}
+                </span>
+              </div>
+              <div className="bg-rose-950/10 p-2.5 rounded-lg border border-rose-900/20 text-center">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 block">Ignored</span>
+                <span className="text-sm font-bold text-rose-400">
+                  {stagedFiles.filter(f => !getValidationStatus(f).valid).length}
+                </span>
+              </div>
             </div>
-            <button className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md active:scale-95 transition-all">
-              로컬 폴더 선택하기
+
+            {/* Scrollable File List */}
+            <div className="max-h-60 overflow-y-auto border border-slate-800/60 bg-slate-950/50 rounded-xl pr-1">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-900/60 border-b border-slate-800/60 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
+                    <th className="p-2.5 pl-3">File Path</th>
+                    <th className="p-2.5">Size</th>
+                    <th className="p-2.5">Lang</th>
+                    <th className="p-2.5 pr-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {stagedFiles.map((file, idx) => {
+                    const status = getValidationStatus(file);
+                    const pathStr = file.webkitRelativePath || file.name;
+                    return (
+                      <tr key={idx} className="hover:bg-slate-900/30 transition-colors">
+                        <td className="p-2.5 pl-3 font-mono text-[11px] text-slate-300 max-w-[240px] truncate" title={pathStr}>
+                          {pathStr}
+                        </td>
+                        <td className="p-2.5 text-slate-400 text-[11px]">
+                          {formatFileSize(file.size)}
+                        </td>
+                        <td className="p-2.5 text-slate-400 text-[11px]">
+                          {getLanguageFromExtension(file.name)}
+                        </td>
+                        <td className="p-2.5 pr-3 text-right">
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                            status.valid 
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                              : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          }`}>
+                            {status.reason}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => performFolderAnalysis(stagedFiles)}
+              disabled={stagedFiles.filter(f => getValidationStatus(f).valid).length === 0}
+              className={`w-full font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all duration-300 shadow-lg active:scale-[0.98] ${
+                stagedFiles.filter(f => getValidationStatus(f).valid).length > 0
+                  ? 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+              }`}
+            >
+              <Play size={13} />
+              <span>Gemini AI 정밀 진단 시작하기</span>
             </button>
           </div>
-        </div>
+        ) : (
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => document.getElementById('folder-input')?.click()}
+            className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300 ${
+              isDragging 
+                ? 'border-indigo-500 bg-indigo-600/5 shadow-[0_0_25px_0_rgba(99,102,241,0.15)] scale-[1.01]' 
+                : 'border-slate-800 hover:border-slate-700/80 hover:bg-slate-900/10'
+            }`}
+          >
+            {/* 폴더 선택 전용 Input */}
+            <input
+              id="folder-input"
+              type="file"
+              className="hidden"
+              onChange={handleFolderChange}
+              {...inputProps}
+            />
+            <div className="flex flex-col items-center gap-3">
+              <div className="p-3.5 bg-slate-900/60 rounded-xl text-indigo-400 border border-slate-800/80 shadow-[0_0_15px_0_rgba(99,102,241,0.1)]">
+                <FolderOpen size={28} />
+              </div>
+              <div>
+                <p className="text-xs text-slate-300 font-semibold">
+                  분석할 로컬 프로젝트 폴더를 선택하거나 여기에 끌어다 놓으세요
+                </p>
+                <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                  폴더 내의 소스코드 파일들을 자동 분류하여 순차 진단하고,<br />
+                  **폴더 이름을 감지하여 대시보드 프로젝트로 자동 등록**합니다.
+                </p>
+              </div>
+              <button className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md active:scale-95 transition-all">
+                로컬 폴더 선택하기
+              </button>
+            </div>
+          </div>
+        )
       ) : (
         <div className="border border-slate-800/80 rounded-2xl p-6 bg-slate-950/20 shadow-inner">
           <div className="flex items-start gap-4">
