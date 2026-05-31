@@ -595,7 +595,7 @@ export const Uploader: React.FC = () => {
   return (
     <div className="glass-panel rounded-2xl p-6 shadow-xl animate-in fade-in duration-300">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-300">실시간 Gemini 1.5 AI 폴더 정밀 분석</h3>
+        <h3 className="text-sm font-semibold text-slate-300">실시간 CodeEye 로컬 폴더 정밀 분석</h3>
         <span className="text-xs text-slate-500">탐색기 폴더 단위 업로드</span>
       </div>
 
@@ -682,7 +682,7 @@ export const Uploader: React.FC = () => {
               }`}
             >
               <Play size={13} />
-              <span>Gemini AI 정밀 진단 시작하기</span>
+              <span>CodeEye 로컬 보안 진단 시작하기</span>
             </button>
           </div>
         ) : (
@@ -748,7 +748,7 @@ export const Uploader: React.FC = () => {
                   {uploadStatus === 'analyzing' && (
                     <>
                       <RefreshCw size={10} className="animate-spin text-indigo-400" />
-                      Gemini 1.5 결함 스캔 중
+                      로컬 보안 결함 스캔 중
                     </>
                   )}
                   {uploadStatus === 'done' && (
@@ -772,7 +772,7 @@ export const Uploader: React.FC = () => {
               <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
                 <AlertCircle size={12} />
                 {uploadStatus === 'uploading' && '프로젝트 및 빌드 런 구성 요소를 분석하는 중입니다.'}
-                {uploadStatus === 'analyzing' && '코드에 포함된 보안 허점과 리스크를 Gemini가 자율 진단하는 중입니다.'}
+                {uploadStatus === 'analyzing' && '코드에 포함된 보안 허점과 리스크를 로컬 정적 분석 엔진이 실시간 진단하는 중입니다.'}
                 {uploadStatus === 'done' && (
                   <span className="text-emerald-400 font-semibold">
                     분석 완료되었습니다. 대시보드를 새로고침합니다.

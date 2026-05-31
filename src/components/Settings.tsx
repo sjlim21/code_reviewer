@@ -183,14 +183,6 @@ export const Settings: React.FC = () => {
                 <span>Local Static AST Analyzer</span>
                 <span className="text-emerald-400 font-bold uppercase">Active (C/C++, JS/TS, Python)</span>
               </div>
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                <span>Gemini 1.5 Deep Scan</span>
-                {import.meta.env.VITE_GEMINI_API_KEY ? (
-                  <span className="text-emerald-400 font-bold uppercase">Active (API Key detected)</span>
-                ) : (
-                  <span className="text-slate-500 font-bold uppercase">Inactive (Running in Local Fallback)</span>
-                )}
-              </div>
             </div>
           </div>
 
