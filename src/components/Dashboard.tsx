@@ -173,9 +173,127 @@ export const Dashboard: React.FC = () => {
   const handleExport = (format: 'csv' | 'json' | 'pdf') => {
     if (format === 'pdf') {
       setExportDropdownOpen(false);
-      setTimeout(() => {
-        window.print();
-      }, 100);
+
+      const unresolvedIssues = projectIssues
+        .filter(i => i.status !== 'resolved')
+        .sort((a, b) => b.priority_score - a.priority_score);
+
+      const severityColor = (sev: string) => {
+        if (sev === 'critical') return '#dc2626';
+        if (sev === 'high') return '#ea580c';
+        if (sev === 'medium') return '#ca8a04';
+        return '#2563eb';
+      };
+
+      const issueRows = unresolvedIssues.length > 0
+        ? unresolvedIssues.map(issue => `
+          <tr style="border-bottom: 1px solid #cbd5e1;">
+            <td style="padding: 8px 8px 8px 0; font-weight: 800; color: ${severityColor(issue.severity)};">${issue.severity.toUpperCase()}</td>
+            <td style="padding: 8px;">
+              <div style="font-weight: 700; color: #0f172a;">${issue.title}</div>
+              <div style="font-size: 10px; color: #64748b; margin-top: 3px;">${issue.description}</div>
+            </td>
+            <td style="padding: 8px; font-family: monospace; font-size: 10px; color: #475569; word-break: break-all;">${issue.file_path} (Lines ${issue.line_start}-${issue.line_end})</td>
+            <td style="padding: 8px; text-align: right; font-family: monospace; font-weight: 700; color: #1e293b;">${issue.priority_score}점</td>
+          </tr>`).join('')
+        : '<tr><td colspan="4" style="padding: 32px; text-align: center; color: #94a3b8;">감지된 미해결 결함이 없습니다. 프로젝트 상태 양호.</td></tr>';
+
+      const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>CodeEye 보안 진단 보고서 – ${selectedProject?.name || 'Project'}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; background: white; }
+    .page { padding: 48px 56px; max-width: 900px; margin: 0 auto; }
+    .cover { height: 270mm; display: flex; flex-direction: column; justify-content: space-between; border: 4px solid #0f172a; padding: 56px; page-break-after: always; }
+    .cover-label { font-family: monospace; font-size: 11px; letter-spacing: 0.2em; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 20px; }
+    .cover-title { font-size: 42px; font-weight: 900; line-height: 1.1; color: #0f172a; margin-bottom: 16px; }
+    .cover-desc { font-size: 14px; color: #475569; line-height: 1.7; max-width: 520px; }
+    .cover-meta { border-top: 2px solid #0f172a; padding-top: 20px; font-family: monospace; font-size: 13px; color: #334155; line-height: 2; }
+    .section { padding: 40px 0; page-break-inside: avoid; }
+    .section-title { font-size: 22px; font-weight: 800; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 24px; color: #0f172a; }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .stat-card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; }
+    .stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 6px; letter-spacing: 0.1em; }
+    .stat-value { font-size: 28px; font-weight: 900; color: #0f172a; }
+    .sev-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; text-align: center; }
+    .sev-card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 6px; }
+    .sev-name { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
+    .sev-count { font-size: 22px; font-weight: 900; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { padding: 10px 8px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #0f172a; text-transform: uppercase; font-size: 9px; letter-spacing: 0.08em; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .cover { page-break-after: always; }
+      .section { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="cover">
+      <div>
+        <div class="cover-label">Security Audit Report</div>
+        <div class="cover-title">CodeEye<br/>보안 및 품질 진단 보고서</div>
+        <div class="cover-desc">본 보고서는 로컬 정적 분석 엔진을 통해 소스코드의 취약성, 버퍼 오버플로우, 메모리 누수 및 코드의 품질 상태를 정밀 분석하여 작성되었습니다.</div>
+      </div>
+      <div class="cover-meta">
+        <div><strong>프로젝트명:</strong> ${selectedProject?.name || 'Local Project'}</div>
+        <div><strong>진단 주체:</strong> CodeEye Local Static Analyzer</div>
+        <div><strong>진단 일시:</strong> ${new Date().toLocaleString('ko-KR')}</div>
+        <div><strong>품질 등급:</strong> Grade ${healthGrade} (${healthScore} / 100)</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">1. 진단 통계 요약 (Executive Summary)</div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">프로젝트 품질 점수</div>
+          <div class="stat-value">${healthScore} / 100 (Grade ${healthGrade})</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">평균 해결 소요 시간</div>
+          <div class="stat-value">${velocityMetrics.avgHours === 'N/A' ? 'N/A' : velocityMetrics.avgHours + '시간'}</div>
+        </div>
+      </div>
+      <div class="sev-grid">
+        <div class="sev-card"><div class="sev-name">Critical</div><div class="sev-count" style="color:#dc2626">${metrics.critical}건</div></div>
+        <div class="sev-card"><div class="sev-name">High</div><div class="sev-count" style="color:#ea580c">${metrics.high}건</div></div>
+        <div class="sev-card"><div class="sev-name">Medium</div><div class="sev-count" style="color:#ca8a04">${metrics.medium}건</div></div>
+        <div class="sev-card"><div class="sev-name">Low</div><div class="sev-count" style="color:#2563eb">${metrics.low}건</div></div>
+        <div class="sev-card"><div class="sev-name">Resolved</div><div class="sev-count" style="color:#059669">${metrics.resolved}건</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">2. 미해결 보안 위협 목록</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:80px;">심각도</th>
+            <th>결함 설명</th>
+            <th style="width:200px;">파일명</th>
+            <th style="width:60px; text-align:right;">점수</th>
+          </tr>
+        </thead>
+        <tbody>${issueRows}</tbody>
+      </table>
+    </div>
+  </div>
+  <script>window.onload = function() { window.print(); window.onafterprint = function() { window.close(); }; };</script>
+</body>
+</html>`;
+
+      const printWin = window.open('', '_blank', 'width=960,height=900,scrollbars=yes');
+      if (printWin) {
+        printWin.document.write(html);
+        printWin.document.close();
+      } else {
+        alert('팝업이 차단되어 있습니다. 브라우저에서 팝업 허용 후 다시 시도해 주세요.');
+      }
       return;
     }
 
@@ -222,7 +340,7 @@ export const Dashboard: React.FC = () => {
   };
 
   // 중요도별 카운트 계산
-  const metrics = useMemo(() => {
+  const metrics = (() => {
     const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0, open: 0, resolved: 0 };
     projectIssues.forEach(issue => {
       if (issue.status === 'open' || issue.status === 'in_progress') {
@@ -233,10 +351,10 @@ export const Dashboard: React.FC = () => {
       }
     });
     return counts;
-  }, [projectIssues]);
+  })();
 
   // 프로젝트 건강성 수치 계산 (Health Grade)
-  const healthScore = useMemo(() => {
+  const healthScore = (() => {
     let score = 100;
     projectIssues.forEach(issue => {
       if (issue.status === 'open' || issue.status === 'in_progress') {
@@ -247,22 +365,22 @@ export const Dashboard: React.FC = () => {
       }
     });
     return Math.max(0, score);
-  }, [projectIssues]);
+  })();
 
-  const healthGrade = useMemo(() => {
+  const healthGrade = (() => {
     if (healthScore >= 90) return 'A';
     if (healthScore >= 80) return 'B';
     if (healthScore >= 70) return 'C';
     if (healthScore >= 60) return 'D';
     return 'F';
-  }, [healthScore]);
+  })();
 
-  const scoreColor = useMemo(() => {
+  const scoreColor = (() => {
     if (healthScore >= 90) return 'text-emerald-400';
     if (healthScore >= 75) return 'text-indigo-400';
     if (healthScore >= 60) return 'text-amber-400';
     return 'text-rose-500';
-  }, [healthScore]);
+  })();
 
   // 최근 30일 누적 이슈 추이 트렌드 (미해결 vs 해결됨) 및 해결 속도 연산
   const { chartTrend30Days, velocityMetrics } = useMemo(() => {
@@ -1040,8 +1158,8 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Printable Executive Report Container */}
-      <div id="codeeye-print-report" className="hidden font-sans p-8 space-y-8 text-black bg-white">
+      {/* Print report is now generated via popup window - no hidden DOM element needed */}
+      <div id="codeeye-print-report-placeholder" className="hidden">
         
         {/* Cover Page */}
         <div className="flex flex-col justify-between h-[270mm] p-12 border-4 border-slate-900 page-break-after">
