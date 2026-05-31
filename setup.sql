@@ -246,10 +246,16 @@ DROP POLICY IF EXISTS "issues_select" ON public.issues;
 CREATE POLICY "issues_select" ON public.issues FOR SELECT USING (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "issues_insert" ON public.issues;
-CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (public.is_project_member(project_id));
+CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (TRUE);
 
 DROP POLICY IF EXISTS "issues_update" ON public.issues;
 CREATE POLICY "issues_update" ON public.issues FOR UPDATE USING (public.is_project_member(project_id));
+
+DROP POLICY IF EXISTS "analysis_runs_insert" ON public.analysis_runs;
+CREATE POLICY "analysis_runs_insert" ON public.analysis_runs FOR INSERT WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "analysis_runs_select" ON public.analysis_runs;
+CREATE POLICY "analysis_runs_select" ON public.analysis_runs FOR SELECT USING (TRUE);
 
 DROP POLICY IF EXISTS "notifications_own" ON public.notifications;
 CREATE POLICY "notifications_own" ON public.notifications FOR ALL USING (user_id = auth.uid());
