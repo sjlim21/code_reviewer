@@ -170,7 +170,15 @@ export const Dashboard: React.FC = () => {
     }).sort((a, b) => b.priority_score - a.priority_score);
   }, [projectIssues, searchTerm, severityFilter, categoryFilter, statusFilter]);
 
-  const handleExport = (format: 'csv' | 'json') => {
+  const handleExport = (format: 'csv' | 'json' | 'pdf') => {
+    if (format === 'pdf') {
+      setExportDropdownOpen(false);
+      setTimeout(() => {
+        window.print();
+      }, 100);
+      return;
+    }
+
     if (filteredIssues.length === 0) {
       alert('내보낼 데이터가 없습니다.');
       return;
@@ -940,6 +948,13 @@ export const Dashboard: React.FC = () => {
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                       JSON 다운로드
                     </button>
+                    <button
+                      onClick={() => handleExport('pdf')}
+                      className="w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-slate-900/60 hover:text-white transition-colors cursor-pointer flex items-center gap-2 border-t border-slate-800/80 mt-1 pt-1.5"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                      PDF 보고서 출력
+                    </button>
                   </div>
                 </>
               )}
@@ -1022,6 +1037,116 @@ export const Dashboard: React.FC = () => {
               조건을 충족하는 분석 결함을 찾을 수 없습니다.
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Printable Executive Report Container */}
+      <div id="codeeye-print-report" className="hidden font-sans p-8 space-y-8 text-black bg-white">
+        
+        {/* Cover Page */}
+        <div className="flex flex-col justify-between h-[270mm] p-12 border-4 border-slate-900 page-break-after">
+          <div className="space-y-6 mt-20">
+            <div className="text-[12px] font-mono tracking-widest text-slate-500 font-bold uppercase">Security Audit Report</div>
+            <h1 className="text-5xl font-black tracking-tight text-slate-900">CodeEye 보안 및 품질 진단 보고서</h1>
+            <p className="text-lg text-slate-600 leading-relaxed max-w-lg">
+              본 보고서는 로컬 정적 분석 엔진을 통해 소스코드의 취약성, 버퍼 오버플로우, 메모리 누수 및 코드의 품질 상태를 정밀 분석하여 작성되었습니다.
+            </p>
+          </div>
+
+          <div className="space-y-4 border-t-2 border-slate-900 pt-6 font-mono text-sm text-slate-700">
+            <div><strong>프로젝트명:</strong> {selectedProject?.name || 'Local Project'}</div>
+            <div><strong>진단 주체:</strong> CodeEye Local Static Analyzer</div>
+            <div><strong>진단 일시:</strong> {new Date().toLocaleString('ko-KR')}</div>
+            <div><strong>품질 등급:</strong> Grade {healthGrade} ({healthScore} / 100)</div>
+          </div>
+        </div>
+
+        {/* Dashboard Statistics Page */}
+        <div className="space-y-6 py-6 page-break-after">
+          <h2 className="text-2xl font-bold border-b-2 border-slate-950 pb-2 text-slate-900">1. 진단 통계 요약 (Executive Summary)</h2>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="border border-slate-300 p-4 rounded-xl space-y-1">
+              <span className="text-xs text-slate-500 font-bold uppercase">프로젝트 품질 점수</span>
+              <div className="text-3xl font-extrabold text-slate-900">{healthScore} / 100 (Grade {healthGrade})</div>
+            </div>
+            <div className="border border-slate-300 p-4 rounded-xl space-y-1">
+              <span className="text-xs text-slate-500 font-bold uppercase">평균 해결 소요 시간</span>
+              <div className="text-3xl font-extrabold text-slate-900">{velocityMetrics.avgHours === 'N/A' ? 'N/A' : `${velocityMetrics.avgHours}시간`}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-5 gap-2 text-center text-xs mt-4">
+            <div className="border border-slate-300 p-2.5 rounded-lg">
+              <div className="text-slate-500 font-bold">Critical</div>
+              <div className="text-xl font-extrabold mt-1 text-red-600">{metrics.critical}건</div>
+            </div>
+            <div className="border border-slate-300 p-2.5 rounded-lg">
+              <div className="text-slate-500 font-bold">High</div>
+              <div className="text-xl font-extrabold mt-1 text-orange-600">{metrics.high}건</div>
+            </div>
+            <div className="border border-slate-300 p-2.5 rounded-lg">
+              <div className="text-slate-500 font-bold">Medium</div>
+              <div className="text-xl font-extrabold mt-1 text-yellow-600">{metrics.medium}건</div>
+            </div>
+            <div className="border border-slate-300 p-2.5 rounded-lg">
+              <div className="text-slate-500 font-bold">Low</div>
+              <div className="text-xl font-extrabold mt-1 text-blue-600">{metrics.low}건</div>
+            </div>
+            <div className="border border-slate-300 p-2.5 rounded-lg">
+              <div className="text-slate-500 font-bold">Resolved</div>
+              <div className="text-xl font-extrabold mt-1 text-emerald-600">{metrics.resolved}건</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Unresolved Issues List Page */}
+        <div className="space-y-6 py-6">
+          <h2 className="text-2xl font-bold border-b-2 border-slate-950 pb-2 text-slate-900">2. 미해결 보안 위협 목록</h2>
+          
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b-2 border-slate-900 text-slate-700 font-bold">
+                <th className="py-2.5 pr-2 w-16">심각도</th>
+                <th className="py-2.5 px-2">결함 설명</th>
+                <th className="py-2.5 px-2 w-48">파일명</th>
+                <th className="py-2.5 px-2 w-12 text-right">점수</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projectIssues.filter(i => i.status !== 'resolved').length > 0 ? (
+                projectIssues
+                  .filter(i => i.status !== 'resolved')
+                  .sort((a, b) => b.priority_score - a.priority_score)
+                  .map(issue => (
+                    <tr key={issue.id} className="border-b border-slate-300">
+                      <td className="py-2 pr-2 font-extrabold">
+                        <span className={
+                          issue.severity === 'critical' ? 'text-red-600' :
+                          issue.severity === 'high' ? 'text-orange-600' :
+                          issue.severity === 'medium' ? 'text-yellow-600' :
+                          'text-blue-600'
+                        }>
+                          {issue.severity.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2">
+                        <div className="font-bold text-slate-955">{issue.title}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">{issue.description}</div>
+                      </td>
+                      <td className="py-2 px-2 font-mono text-[10px] text-slate-600 break-all">
+                        {issue.file_path} (Lines {issue.line_start}-{issue.line_end})
+                      </td>
+                      <td className="py-2 px-2 text-right font-mono font-bold text-slate-800">{issue.priority_score}점</td>
+                    </tr>
+                  ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-slate-500">감지된 미해결 결함이 없습니다. 프로젝트 상태 양호.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

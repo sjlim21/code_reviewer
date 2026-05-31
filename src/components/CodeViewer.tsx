@@ -72,6 +72,34 @@ function computeLineDiff(A: string[], B: string[]): { originalDiff: DiffLine[]; 
   return { originalDiff, suggestedDiff };
 }
 
+function extractSuggestedCode(suggestion: string): string {
+  if (!suggestion) return '';
+  
+  // Case 1: Extract code inside markdown code fences
+  const codeBlocks: string[] = [];
+  const regex = /```(?:[a-zA-Z0-9+#-]+)?\n([\s\S]*?)```/g;
+  let match;
+  while ((match = regex.exec(suggestion)) !== null) {
+    if (match[1]) codeBlocks.push(match[1].trim());
+  }
+
+  if (codeBlocks.length > 0) {
+    if (codeBlocks.length >= 2) {
+      return codeBlocks[codeBlocks.length - 1]; // return the last one (usually TO-BE)
+    }
+    return codeBlocks[0];
+  }
+
+  // Case 2: Extract based on # TO-BE or // TO-BE or ### TO-BE header
+  const toBeSplit = suggestion.split(/(?:#|\/\/|\/\*|###)\s*TO-BE/i);
+  if (toBeSplit.length > 1) {
+    return toBeSplit[1].replace(/^\s*[\r\n]+/, '').trim();
+  }
+
+  // Fallback
+  return suggestion.trim();
+}
+
 interface DiffCodeBlockProps {
   code: string;
   otherCode: string;
@@ -146,9 +174,14 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const cleanSuggestedCode = useMemo(() => {
+    if (!issue) return '';
+    return extractSuggestedCode(issue.suggestion);
+  }, [issue]);
+
   const handleCopyCode = () => {
-    if (!issue?.suggestion) return;
-    navigator.clipboard.writeText(issue.suggestion).then(() => {
+    if (!cleanSuggestedCode) return;
+    navigator.clipboard.writeText(cleanSuggestedCode).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -297,7 +330,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
                 </div>
                 <DiffCodeBlock 
                   code={issue.code_snippet} 
-                  otherCode={issue.suggestion} 
+                  otherCode={cleanSuggestedCode} 
                   isOriginal={true} 
                   filePath={issue.file_path} 
                 />
@@ -324,7 +357,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
                 </div>
                 <DiffCodeBlock 
                   code={issue.code_snippet} 
-                  otherCode={issue.suggestion} 
+                  otherCode={cleanSuggestedCode} 
                   isOriginal={false} 
                   filePath={issue.file_path} 
                 />

@@ -273,3 +273,57 @@ code, pre {
 .drag-active-glow {
   animation: pulse-glow 2s infinite ease-in-out;
 }
+
+/* Print Media Styles */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Hide all standard web components during printing */
+  #root,
+  .glass-panel,
+  .fixed,
+  button,
+  select,
+  input,
+  header,
+  footer,
+  aside {
+    display: none !important;
+  }
+  
+  /* Show printable report container */
+  #codeeye-print-report {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Force page breaks */
+  .page-break-after {
+    page-break-after: always;
+    break-after: page;
+  }
+  
+  /* Retain text colors for printing */
+  .text-red-600 {
+    color: #dc2626 !important;
+  }
+  .text-orange-600 {
+    color: #ea580c !important;
+  }
+  .text-yellow-600 {
+    color: #ca8a04 !important;
+  }
+  .text-blue-600 {
+    color: #2563eb !important;
+  }
+  .text-emerald-600 {
+    color: #059669 !important;
+  }
+}

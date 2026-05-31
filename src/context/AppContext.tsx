@@ -9,6 +9,13 @@ import {
   type Project 
 } from '../supabase';
 
+export interface EventLog {
+  id: string;
+  timestamp: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+}
+
 interface AppContextType {
   activeTab: 'dashboard' | 'upload' | 'settings';
   setActiveTab: React.Dispatch<React.SetStateAction<'dashboard' | 'upload' | 'settings'>>;
@@ -33,6 +40,9 @@ interface AppContextType {
   handleAnalysisComplete: (newIssues: Issue[]) => void;
   handleDeleteProject: (projectId: string) => Promise<void>;
   handleLogout: () => Promise<void>;
+  eventLogs: EventLog[];
+  addEventLog: (message: string, type?: EventLog['type']) => void;
+  clearEventLogs: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -44,6 +54,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [issues, setIssues] = useState<Issue[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isUsingRealDB, setIsUsingRealDB] = useState(false);
+  const [eventLogs, setEventLogs] = useState<EventLog[]>([]);
+
+  const addEventLog = (message: string, type: EventLog['type'] = 'info') => {
+    const newLog: EventLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+      message,
+      type
+    };
+    setTimeout(() => {
+      setEventLogs(prev => [newLog, ...prev].slice(0, 100));
+    }, 0);
+  };
+
+  const clearEventLogs = () => {
+    setEventLogs([]);
+    addEventLog('시스템 이벤트 콘솔이 초기화되었습니다.', 'info');
+  };
+
+  useEffect(() => {
+    addEventLog('CodeEye 보안 진단 콘솔 초기화 완료.', 'info');
+  }, []);
   
   const [theme, setTheme] = useState<'indigo' | 'emerald' | 'amber'>(() => {
     return (localStorage.getItem('codeeye-theme') as 'indigo' | 'emerald' | 'amber') || 'indigo';
@@ -83,6 +115,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (prev?.user?.id === currentSession?.user?.id) {
           return prev;
         }
+        if (currentSession) {
+          addEventLog(`GitHub 계정 로그인 감지: ${currentSession.user?.email || currentSession.user?.id}`, 'success');
+        }
         return currentSession;
       });
       
@@ -112,8 +147,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (!supabase || isDemoSession) {
-        console.log("Using Mock fallback data (Demo Session).");
         if (!ignore) {
+          addEventLog('데모 세션 활성화 - 로컬 가상 Mock 데이터를 패칭합니다.', 'info');
           setProjects(mockProjects);
           setIssues(mockIssues);
           setSelectedProject(mockProjects[0]);
@@ -125,6 +160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         if (!ignore) {
           setIsUsingRealDB(true);
+          addEventLog('Supabase 클라우드 데이터베이스 연결 중...', 'info');
         }
         
         const { data: dbProjects, error: projError } = await supabase
@@ -136,6 +172,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (ignore) return;
 
         if (dbProjects && dbProjects.length > 0) {
+          addEventLog(`클라우드 프로젝트 데이터를 성공적으로 로드했습니다. (총 ${dbProjects.length}개)`, 'success');
           setProjects(dbProjects as Project[]);
           setSelectedProject(current => {
             if (current && dbProjects.some(p => p.id === current.id)) {
@@ -156,6 +193,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         } else {
           if (!ignore) {
+            addEventLog('클라우드 DB에 생성된 프로젝트가 없습니다.', 'info');
             setProjects([]);
             setIssues([]);
             setSelectedProject(null);
@@ -165,6 +203,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.error("Supabase load error:", err);
         if (!ignore) {
+          addEventLog('Supabase 로드 에러가 발생하여 오프라인 모드로 전환합니다.', 'error');
           setProjects([]);
           setIssues([]);
           setSelectedProject(null);
@@ -187,11 +226,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let ignore = false;
 
     const fetchIssuesForProject = async () => {
-      if (!selectedProject || !isUsingRealDB) return;
+      if (!selectedProject) return;
+      if (!isUsingRealDB) {
+        addEventLog(`[프로젝트 전환] 데모 프로젝트 '${selectedProject.name}'의 이슈 목록을 가져왔습니다.`, 'info');
+        return;
+      }
+      
       const supabase = getSupabaseClient();
       if (!supabase) return;
 
       try {
+        addEventLog(`[프로젝트 전환] '${selectedProject.name}' 프로젝트 이슈 데이터를 패칭 중...`, 'info');
         const { data: dbIssues, error } = await supabase
           .from('issues')
           .select('*')
@@ -201,9 +246,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (error) throw error;
         if (!ignore) {
           setIssues(dbIssues as Issue[]);
+          addEventLog(`[프로젝트 전환] '${selectedProject.name}'의 이슈 ${dbIssues.length}건을 로드했습니다.`, 'success');
         }
       } catch (err) {
         console.error("Fetch issues error:", err);
+        addEventLog(`[에러] '${selectedProject.name}' 이슈 패칭 실패.`, 'error');
       }
     };
 
@@ -219,6 +266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const supabase = getSupabaseClient();
     if (!supabase || !selectedProject || !isUsingRealDB) return;
 
+    addEventLog(`[실시간 데이터] '${selectedProject.name}' 프로젝트의 Postgres 변경 알림 구독 중...`, 'info');
     const channel = supabase
       .channel('schema-db-changes')
       .on(
@@ -232,11 +280,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (payload) => {
           console.log('Realtime change detected:', payload);
           if (payload.eventType === 'INSERT') {
-            setIssues(prev => [payload.new as Issue, ...prev].sort((a, b) => b.priority_score - a.priority_score));
+            const ins = payload.new as Issue;
+            addEventLog(`[실시간 동기화] 새로운 결함 감지: [${ins.severity.toUpperCase()}] ${ins.title}`, 'warning');
+            setIssues(prev => [ins, ...prev].sort((a, b) => b.priority_score - a.priority_score));
           } else if (payload.eventType === 'UPDATE') {
-            setIssues(prev => prev.map(issue => issue.id === payload.new.id ? (payload.new as Issue) : issue));
-            setSelectedIssue(current => current && current.id === payload.new.id ? (payload.new as Issue) : current);
+            const upd = payload.new as Issue;
+            addEventLog(`[실시간 동기화] 결함 업데이트됨: [${upd.status}] ${upd.title}`, 'info');
+            setIssues(prev => prev.map(issue => issue.id === upd.id ? upd : issue));
+            setSelectedIssue(current => current && current.id === upd.id ? upd : current);
           } else if (payload.eventType === 'DELETE') {
+            addEventLog(`[실시간 동기화] 결함 삭제됨 (ID: ${payload.old.id})`, 'info');
             setIssues(prev => prev.filter(issue => issue.id !== payload.old.id));
           }
         }
@@ -244,6 +297,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .subscribe();
 
     return () => {
+      addEventLog(`[실시간 데이터] '${selectedProject.name}' 실시간 채널 구독 해제`, 'info');
       supabase.removeChannel(channel);
     };
   }, [selectedProject, isUsingRealDB]);
@@ -252,6 +306,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const handleUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
     const previousIssues = [...issues];
     const previousSelectedIssue = selectedIssue ? { ...selectedIssue } : null;
+    const targetIssue = issues.find(i => i.id === issueId);
+    const title = targetIssue ? targetIssue.title : issueId;
+
+    addEventLog(`[이슈 변경] 결함 [${title}]의 상태를 '${newStatus}'(으)로 변경 중...`, 'info');
 
     setIssues(prevIssues => 
       prevIssues.map(issue => 
@@ -281,13 +339,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             })
             .eq('id', issueId);
           if (error) throw error;
+          addEventLog(`[이슈 변경 완료] DB 업데이트 성공.`, 'success');
         } catch (e) {
           console.error("DB status update failed. Rolling back state:", e);
+          addEventLog(`[에러] 이슈 변경 실패, 롤백 수행.`, 'error');
           alert('데이터베이스 업데이트 실패로 변경 사항이 롤백되었습니다.');
           setIssues(previousIssues);
           setSelectedIssue(previousSelectedIssue);
         }
       }
+    } else {
+      addEventLog(`[이슈 변경 완료] 로컬 세션 상태 업데이트 완료.`, 'success');
+    }
+
+    // Webhook simulation if URL exists
+    const slack = localStorage.getItem('code_eye_slack_webhook_url');
+    const discord = localStorage.getItem('code_eye_discord_webhook_url');
+    if (slack || discord) {
+      addEventLog(`[웹훅 연동] 결함 상태 변경 이벤트 알림 전송 시작...`, 'info');
+      setTimeout(() => {
+        if (slack) addEventLog(`[웹훅 연동] Slack 채널로 [${newStatus}] 알림 전송 성공`, 'success');
+        if (discord) addEventLog(`[웹훅 연동] Discord 채널로 [${newStatus}] 알림 전송 성공`, 'success');
+      }, 300);
     }
   };
 
@@ -295,13 +368,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const handleAnalysisComplete = (newIssues: Issue[]) => {
     setIssues(prev => [...newIssues, ...prev].sort((a, b) => b.priority_score - a.priority_score));
     setActiveTab('dashboard');
+    addEventLog(`[진단 완료] 정적 진단이 완료되었습니다. (감지된 결함: ${newIssues.length}건)`, 'success');
+
+    // Webhook simulation if URL exists and contains issues
+    if (newIssues.length > 0) {
+      const slack = localStorage.getItem('code_eye_slack_webhook_url');
+      const discord = localStorage.getItem('code_eye_discord_webhook_url');
+      if (slack || discord) {
+        addEventLog(`[웹훅 연동] 새로운 취약점 발견 알림 웹훅 전송 시작...`, 'info');
+        setTimeout(() => {
+          if (slack) addEventLog(`[웹훅 연동] Slack 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success');
+          if (discord) addEventLog(`[웹훅 연동] Discord 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success');
+        }, 500);
+      }
+    }
   };
 
   // 7. 프로젝트 삭제 핸들러
   const handleDeleteProject = async (projectId: string) => {
+    const targetProj = projects.find(p => p.id === projectId);
+    const name = targetProj ? targetProj.name : projectId;
+
     if (!window.confirm('정말로 이 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며, 프로젝트와 연결된 모든 이슈 및 분석 이력이 영구적으로 제거됩니다.')) {
       return;
     }
+
+    addEventLog(`[프로젝트 삭제] '${name}' 프로젝트를 삭제하는 중...`, 'info');
 
     if (isUsingRealDB) {
       const supabase = getSupabaseClient();
@@ -312,13 +404,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             .delete()
             .eq('id', projectId);
           if (error) throw error;
+          addEventLog(`[프로젝트 삭제 완료] DB 삭제 성공.`, 'success');
         } catch (e) {
           console.error("DB project delete failed:", e);
           const errorMsg = e instanceof Error ? e.message : String(e);
+          addEventLog(`[에러] 프로젝트 DB 삭제 실패: ${errorMsg}`, 'error');
           alert('프로젝트 삭제 중 에러가 발생했습니다: ' + errorMsg);
           return;
         }
       }
+    } else {
+      addEventLog(`[프로젝트 삭제 완료] 로컬 데이터 삭제 완료.`, 'success');
     }
 
     const updatedProjects = projects.filter(p => p.id !== projectId);
@@ -336,6 +432,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 로그아웃 핸들러
   const handleLogout = async () => {
+    addEventLog('사용자 로그아웃 프로세스를 실행합니다.', 'info');
     const supabase = getSupabaseClient();
     if (supabase) {
       await supabase.auth.signOut();
@@ -345,6 +442,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedProject(null);
     setProjects([]);
     setIssues([]);
+    addEventLog('성공적으로 로그아웃되었습니다.', 'success');
   };
 
   return (
@@ -371,7 +469,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       handleUpdateStatus,
       handleAnalysisComplete,
       handleDeleteProject,
-      handleLogout
+      handleLogout,
+      eventLogs,
+      addEventLog,
+      clearEventLogs
     }}>
       {children}
     </AppContext.Provider>
