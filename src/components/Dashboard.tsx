@@ -317,9 +317,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="h-64 flex items-center justify-center">
             {chartCategoryData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%" id="category-chart-container">
-                <BarChart data={chartCategoryData} layout="vertical" margin={{ top: 0, right: 10, left: -10, bottom: 0 }}>
+                <BarChart data={chartCategoryData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
                   <XAxis type="number" stroke="#475569" fontSize={10} hide />
-                  <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={11} width={80} tickLine={false} axisLine={false} />
+                  <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={11} width={110} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{ background: 'rgba(15, 22, 36, 0.9)', border: '1px solid rgba(6, 182, 212, 0.3)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}
                     itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
