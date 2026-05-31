@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FolderOpen, FileCode, AlertCircle, CheckCircle, RefreshCw, Trash2, Play } from 'lucide-react';
+import { FolderOpen, Folder, FileCode, AlertCircle, CheckCircle, RefreshCw, Trash2, Play } from 'lucide-react';
 import { getSupabaseClient, type Issue, type Project } from '../supabase';
 import { analyzeCodeWithGemini } from '../geminiAnalyzer';
 import { type Session } from '@supabase/supabase-js';
@@ -96,6 +96,46 @@ const getValidationStatus = (file: File) => {
   return { valid: true, reason: 'Ready' };
 };
 
+interface FileTreeNode {
+  name: string;
+  relativePath: string;
+  file?: File;
+  children: Record<string, FileTreeNode>;
+}
+
+const buildFileTree = (files: File[]): FileTreeNode => {
+  const root: FileTreeNode = { name: 'root', relativePath: '', children: {} };
+
+  files.forEach(file => {
+    const path = file.webkitRelativePath || file.name;
+    const parts = path.split('/');
+
+    let current = root;
+    let accumulatedPath = '';
+
+    parts.forEach((part, index) => {
+      accumulatedPath = accumulatedPath ? `${accumulatedPath}/${part}` : part;
+      const isLast = index === parts.length - 1;
+
+      if (!current.children[part]) {
+        current.children[part] = {
+          name: part,
+          relativePath: accumulatedPath,
+          children: {}
+        };
+      }
+
+      if (isLast) {
+        current.children[part].file = file;
+      }
+
+      current = current.children[part];
+    });
+  });
+
+  return root;
+};
+
 interface UploaderProps {
   selectedProject: Project | null;
   onAnalysisComplete: (newIssues: Issue[]) => void;
@@ -123,6 +163,107 @@ export const Uploader: React.FC<UploaderProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({});
+
+  const toggleFolder = (path: string) => {
+    setCollapsedPaths(prev => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
+  };
+
+  const renderTreeNode = (node: FileTreeNode): React.ReactNode => {
+    const isDirectory = Object.keys(node.children).length > 0;
+    const path = node.relativePath;
+    const isCollapsed = collapsedPaths[path];
+
+    if (isDirectory) {
+      return (
+        <div key={path} className="space-y-1">
+          {/* Directory Row */}
+          <div 
+            onClick={() => toggleFolder(path)}
+            className="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-900/40 rounded-lg cursor-pointer transition-colors text-slate-300 font-medium select-none"
+            style={{ paddingLeft: '8px' }}
+          >
+            <span className="text-slate-500 shrink-0">
+              {isCollapsed ? (
+                <svg className="w-3 h-3 transform -rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                </svg>
+              ) : (
+                <svg className="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                </svg>
+              )}
+            </span>
+            {isCollapsed ? (
+              <Folder size={14} className="text-[var(--theme-accent,#6366f1)] shrink-0" />
+            ) : (
+              <FolderOpen size={14} className="text-[var(--theme-accent,#6366f1)] shrink-0" />
+            )}
+            <span className="text-xs truncate">{node.name}</span>
+            <span className="text-[9px] text-slate-600 font-mono shrink-0 ml-1">
+              ({Object.keys(node.children).length} items)
+            </span>
+          </div>
+
+          {/* Children container with indent guide line */}
+          {!isCollapsed && (
+            <div className="border-l border-slate-800/80 ml-3.5 pl-2.5 space-y-1">
+              {Object.values(node.children)
+                .sort((a, b) => {
+                  const aIsDir = Object.keys(a.children).length > 0;
+                  const bIsDir = Object.keys(b.children).length > 0;
+                  if (aIsDir && !bIsDir) return -1;
+                  if (!aIsDir && aIsDir !== bIsDir) return 1;
+                  return a.name.localeCompare(b.name);
+                })
+                .map(child => renderTreeNode(child))
+              }
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // File Row
+    const file = node.file;
+    if (!file) return null;
+    const status = getValidationStatus(file);
+    
+    return (
+      <div 
+        key={path}
+        className="flex items-center justify-between py-1 px-2 hover:bg-slate-900/30 rounded-lg transition-colors"
+        style={{ paddingLeft: '8px' }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <FileCode size={13} className="text-slate-500 shrink-0" />
+          <span className="text-xs text-slate-400 truncate font-mono" title={node.name}>
+            {node.name}
+          </span>
+          <span className="text-[10px] text-slate-600 font-mono shrink-0">
+            ({formatFileSize(file.size)})
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[9px] text-slate-600 font-mono hidden md:inline">
+            {getLanguageFromExtension(file.name)}
+          </span>
+          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+            status.valid 
+              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+              : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+          }`}>
+            {status.reason}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -487,46 +628,27 @@ export const Uploader: React.FC<UploaderProps> = ({
               </div>
             </div>
 
-            {/* Scrollable File List */}
-            <div className="max-h-60 overflow-y-auto border border-slate-800/60 bg-slate-950/50 rounded-xl pr-1">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-900/60 border-b border-slate-800/60 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
-                    <th className="p-2.5 pl-3">File Path</th>
-                    <th className="p-2.5">Size</th>
-                    <th className="p-2.5">Lang</th>
-                    <th className="p-2.5 pr-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {stagedFiles.map((file, idx) => {
-                    const status = getValidationStatus(file);
-                    const pathStr = file.webkitRelativePath || file.name;
-                    return (
-                      <tr key={idx} className="hover:bg-slate-900/30 transition-colors">
-                        <td className="p-2.5 pl-3 font-mono text-[11px] text-slate-300 max-w-[240px] truncate" title={pathStr}>
-                          {pathStr}
-                        </td>
-                        <td className="p-2.5 text-slate-400 text-[11px]">
-                          {formatFileSize(file.size)}
-                        </td>
-                        <td className="p-2.5 text-slate-400 text-[11px]">
-                          {getLanguageFromExtension(file.name)}
-                        </td>
-                        <td className="p-2.5 pr-3 text-right">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                            status.valid 
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                              : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          }`}>
-                            {status.reason}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {/* Scrollable File Tree */}
+            <div className="max-h-64 overflow-y-auto border border-slate-800/60 bg-slate-950/60 rounded-xl p-4 pr-2 space-y-2">
+              {(() => {
+                const rootNode = buildFileTree(stagedFiles);
+                const topLevelNodes = Object.values(rootNode.children);
+                return topLevelNodes.length > 0 ? (
+                  topLevelNodes
+                    .sort((a, b) => {
+                      const aIsDir = Object.keys(a.children).length > 0;
+                      const bIsDir = Object.keys(b.children).length > 0;
+                      if (aIsDir && !bIsDir) return -1;
+                      if (!aIsDir && aIsDir !== bIsDir) return 1;
+                      return a.name.localeCompare(b.name);
+                    })
+                    .map(node => renderTreeNode(node))
+                ) : (
+                  <div className="text-center text-xs text-slate-500 py-4">
+                    대기 중인 파일이 없습니다.
+                  </div>
+                );
+              })()}
             </div>
 
             <button

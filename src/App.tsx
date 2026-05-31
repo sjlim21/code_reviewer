@@ -33,6 +33,15 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isUsingRealDB, setIsUsingRealDB] = useState(false);
   
+  const [theme, setTheme] = useState<'indigo' | 'emerald' | 'amber'>(() => {
+    return (localStorage.getItem('codeeye-theme') as 'indigo' | 'emerald' | 'amber') || 'indigo';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('codeeye-theme', theme);
+  }, [theme]);
+  
   // 인증 및 세션 상태 추가
   const [session, setSession] = useState<Session | null>(null);
   const [googleToken, setGoogleToken] = useState<string>('');
@@ -350,7 +359,7 @@ function App() {
   if (isLoadingSession) {
     return (
       <div className="min-h-screen bg-[#080c14] flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-[var(--theme-accent)] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -382,7 +391,7 @@ function App() {
       <header className="border-b border-[#26334a]/60 bg-[#131a26]/40 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600/10 border border-indigo-500/30 rounded-xl text-indigo-400">
+            <div className="p-2 bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/30 rounded-xl text-[var(--theme-accent)]">
               <Terminal size={22} className="animate-pulse" />
             </div>
             <div>
@@ -400,9 +409,10 @@ function App() {
             <nav className="flex items-center gap-2">
               <button
                 onClick={() => setActiveTab('dashboard')}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                style={activeTab === 'dashboard' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
                   activeTab === 'dashboard'
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    ? 'text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                 }`}
               >
@@ -411,9 +421,10 @@ function App() {
               </button>
               <button
                 onClick={() => setActiveTab('upload')}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                style={activeTab === 'upload' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
                   activeTab === 'upload'
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    ? 'text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                 }`}
               >
@@ -422,9 +433,10 @@ function App() {
               </button>
               <button
                 onClick={() => setActiveTab('settings')}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                style={activeTab === 'settings' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
                   activeTab === 'settings'
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    ? 'text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                 }`}
               >
@@ -432,6 +444,43 @@ function App() {
                 분석 설정
               </button>
             </nav>
+
+            {/* Theme Switcher */}
+            <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 gap-1.5 shrink-0">
+              <button
+                onClick={() => setTheme('indigo')}
+                className={`p-1.5 rounded-lg text-xs transition-all cursor-pointer ${
+                  theme === 'indigo'
+                    ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+                title="Midnight Indigo"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+              </button>
+              <button
+                onClick={() => setTheme('emerald')}
+                className={`p-1.5 rounded-lg text-xs transition-all cursor-pointer ${
+                  theme === 'emerald'
+                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+                title="Cyberpunk Emerald"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              </button>
+              <button
+                onClick={() => setTheme('amber')}
+                className={`p-1.5 rounded-lg text-xs transition-all cursor-pointer ${
+                  theme === 'amber'
+                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+                title="Solar Amber"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+              </button>
+            </div>
 
             {/* Profile Info & Logout */}
             <div className="flex items-center gap-3 pl-4 border-l border-slate-800/80">
@@ -485,7 +534,7 @@ function App() {
                 href={selectedProject.repo_url} 
                 target="_blank" 
                 rel="noreferrer"
-                className="px-3 py-1.5 bg-[#0b0f19] border border-[#26334a] hover:border-indigo-500/40 hover:bg-slate-800/40 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
+                className="px-3 py-1.5 bg-[#0b0f19] border border-[#26334a] hover:border-[var(--theme-accent)]/40 hover:bg-slate-800/40 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
               >
                 <GitBranch size={12} />
                 Github Repository

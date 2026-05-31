@@ -13,7 +13,11 @@ import {
   X,
   Sparkles,
   Columns,
-  Rows
+  Rows,
+  Maximize2,
+  Minimize2,
+  Copy,
+  Check
 } from 'lucide-react';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
@@ -35,6 +39,16 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
   const [newCommentText, setNewCommentText] = useState('');
   const [commentTrigger, setCommentTrigger] = useState(0);
   const [viewMode, setViewMode] = useState<'split' | 'stacked'>('split');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCode = () => {
+    if (!issue?.suggestion) return;
+    navigator.clipboard.writeText(issue.suggestion).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const comments = useMemo(() => {
     if (!issue) return [];
@@ -92,7 +106,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex justify-end transition-all">
-      <div className="w-full lg:w-7/12 bg-slate-900 border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl animate-in slide-in-from-right duration-300">
+      <div className={`w-full bg-slate-900 border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl animate-in slide-in-from-right duration-300 transition-all ${isFullscreen ? 'lg:w-full' : 'lg:w-7/12'}`}>
         
         {/* Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
@@ -102,12 +116,22 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
             </span>
             <h2 className="text-lg font-bold text-slate-200">{issue.title}</h2>
           </div>
-          <button 
-            onClick={onClose} 
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all"
-          >
-            <X size={18} />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsFullscreen(!isFullscreen)} 
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+              title={isFullscreen ? '창 복원 (Restore)' : '전체 화면 (Fullscreen)'}
+            >
+              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+            <button 
+              onClick={onClose} 
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Core Contents */}
@@ -177,7 +201,18 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
               {/* TO-BE (AI suggestion) */}
               <div className="rounded-xl overflow-hidden border border-indigo-900/40 bg-slate-950 flex flex-col h-full min-h-[220px]">
                 <div className="bg-indigo-950/20 px-4 py-2 text-xs text-indigo-400 font-mono border-b border-indigo-900/30 flex items-center justify-between">
-                  <span>TO-BE (자동 개선 제안)</span>
+                  <div className="flex items-center gap-2">
+                    <span>TO-BE (자동 개선 제안)</span>
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer transition-all active:scale-95 shrink-0"
+                      title="코드 복사"
+                    >
+                      {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      <span>{copied ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                  </div>
                   <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
                     <Sparkles size={9} /> Recommended
                   </span>
