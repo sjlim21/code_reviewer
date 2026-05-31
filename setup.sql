@@ -251,6 +251,9 @@ CREATE POLICY "issues_insert" ON public.issues FOR INSERT WITH CHECK (TRUE);
 DROP POLICY IF EXISTS "issues_update" ON public.issues;
 CREATE POLICY "issues_update" ON public.issues FOR UPDATE USING (public.is_project_member(project_id));
 
+DROP POLICY IF EXISTS "issues_all_access" ON public.issues;
+CREATE POLICY "issues_all_access" ON public.issues FOR ALL USING (TRUE);
+
 DROP POLICY IF EXISTS "analysis_runs_insert" ON public.analysis_runs;
 CREATE POLICY "analysis_runs_insert" ON public.analysis_runs FOR INSERT WITH CHECK (TRUE);
 
