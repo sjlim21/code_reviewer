@@ -16,7 +16,8 @@ import {
   Flame,
   ArrowUpRight,
   Trash2,
-  Clock
+  Clock,
+  Download
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -46,6 +47,55 @@ const severityGlows: { [key: string]: string } = {
   info: 'hover:shadow-[0_0_20px_0_rgba(100,116,139,0.20)]'
 };
 
+interface CustomAreaTooltipProps {
+  active?: boolean;
+  payload?: Array<{ value: number }>;
+  label?: string;
+}
+
+const CustomAreaTooltip: React.FC<CustomAreaTooltipProps> = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="glass-panel border border-indigo-500/35 rounded-xl p-3 shadow-2xl backdrop-blur-md bg-slate-950/85 text-xs font-sans">
+        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1 font-mono">{label}</p>
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+          <span className="text-slate-400">탐지 이슈:</span>
+          <span className="text-xs font-extrabold text-slate-100 font-mono">{payload[0].value}개</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+interface CustomBarTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    payload: {
+      name: string;
+      value: number;
+    };
+  }>;
+}
+
+const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="glass-panel border border-cyan-500/35 rounded-xl p-3 shadow-2xl backdrop-blur-md bg-slate-950/85 text-xs font-sans">
+        <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider mb-1 font-mono">{data.name}</p>
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+          <span className="text-slate-400">결함 수:</span>
+          <span className="text-xs font-extrabold text-slate-100 font-mono">{data.value}개</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 interface DashboardProps {
   selectedProject: Project | null;
   onSelectProject: (project: Project) => void;
@@ -67,6 +117,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('open');
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+
+  const handleCardClick = (type: 'critical' | 'high' | 'medium' | 'low' | 'resolved') => {
+    if (type === 'resolved') {
+      if (statusFilter === 'resolved') {
+        setStatusFilter('open');
+        setSeverityFilter('all');
+      } else {
+        setStatusFilter('resolved');
+        setSeverityFilter('all');
+      }
+    } else {
+      if (severityFilter === type && statusFilter === 'open') {
+        setSeverityFilter('all');
+      } else {
+        setSeverityFilter(type);
+        setStatusFilter('open');
+      }
+    }
+  };
+
+  const isAnyCardActive = ['critical', 'high', 'medium', 'low'].includes(severityFilter) || statusFilter === 'resolved';
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const card = e.currentTarget;
@@ -98,6 +170,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return matchesSearch && matchesSeverity && matchesCategory && matchesStatus;
     }).sort((a, b) => b.priority_score - a.priority_score);
   }, [projectIssues, searchTerm, severityFilter, categoryFilter, statusFilter]);
+
+  const handleExport = (format: 'csv' | 'json') => {
+    if (filteredIssues.length === 0) {
+      alert('내보낼 데이터가 없습니다.');
+      return;
+    }
+
+    if (format === 'json') {
+      const jsonString = JSON.stringify(filteredIssues, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `codeeye_report_${selectedProject?.name || 'project'}_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else if (format === 'csv') {
+      const headers = ['ID', 'Title', 'Severity', 'Category', 'Status', 'File Path', 'Line Start', 'Line End', 'Priority Score', 'Created At'];
+      const rows = filteredIssues.map(issue => [
+        issue.id,
+        `"${(issue.title || '').replace(/"/g, '""')}"`,
+        issue.severity,
+        issue.category,
+        issue.status,
+        `"${(issue.file_path || '').replace(/"/g, '""')}"`,
+        issue.line_start,
+        issue.line_end,
+        issue.priority_score,
+        issue.created_at || ''
+      ]);
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `codeeye_report_${selectedProject?.name || 'project'}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+    setExportDropdownOpen(false);
+  };
 
   // 중요도별 카운트 계산
   const metrics = useMemo(() => {
@@ -393,9 +508,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
           
           {/* Critical Card */}
           <div 
+            onClick={() => handleCardClick('critical')}
             onMouseMove={handleMouseMove}
             style={{ '--glow-color': 'rgba(244,63,94,0.25)' } as React.CSSProperties}
-            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-rose-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(244,63,94,0.25)] group"
+            className={`glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-rose-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 cursor-pointer group ${
+              severityFilter === 'critical' && statusFilter === 'open'
+                ? 'ring-2 ring-rose-500 shadow-[0_0_25px_0_rgba(244,63,94,0.35)] scale-[1.02] border-t border-rose-500/20'
+                : isAnyCardActive
+                  ? 'opacity-40 hover:opacity-100 hover:scale-[1.01]'
+                  : 'hover:shadow-[0_0_25px_0_rgba(244,63,94,0.25)]'
+            }`}
           >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-rose-400 transition-colors">Critical</span>
             <div className="flex items-baseline justify-between mt-4">
@@ -408,9 +530,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
           
           {/* High Card */}
           <div 
+            onClick={() => handleCardClick('high')}
             onMouseMove={handleMouseMove}
             style={{ '--glow-color': 'rgba(249,115,22,0.20)' } as React.CSSProperties}
-            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-orange-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(249,115,22,0.25)] group"
+            className={`glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-orange-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 cursor-pointer group ${
+              severityFilter === 'high' && statusFilter === 'open'
+                ? 'ring-2 ring-orange-500 shadow-[0_0_25px_0_rgba(249,115,22,0.35)] scale-[1.02] border-t border-orange-500/20'
+                : isAnyCardActive
+                  ? 'opacity-40 hover:opacity-100 hover:scale-[1.01]'
+                  : 'hover:shadow-[0_0_25px_0_rgba(249,115,22,0.25)]'
+            }`}
           >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-orange-400 transition-colors">High</span>
             <div className="flex items-baseline justify-between mt-4">
@@ -423,9 +552,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Medium Card */}
           <div 
+            onClick={() => handleCardClick('medium')}
             onMouseMove={handleMouseMove}
             style={{ '--glow-color': 'rgba(234,179,8,0.18)' } as React.CSSProperties}
-            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-yellow-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(234,179,8,0.20)] group"
+            className={`glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-yellow-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 cursor-pointer group ${
+              severityFilter === 'medium' && statusFilter === 'open'
+                ? 'ring-2 ring-yellow-500 shadow-[0_0_25px_0_rgba(234,179,8,0.30)] scale-[1.02] border-t border-yellow-500/20'
+                : isAnyCardActive
+                  ? 'opacity-40 hover:opacity-100 hover:scale-[1.01]'
+                  : 'hover:shadow-[0_0_25px_0_rgba(234,179,8,0.20)]'
+            }`}
           >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-yellow-400 transition-colors">Medium</span>
             <div className="flex items-baseline justify-between mt-4">
@@ -438,9 +574,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Low Card */}
           <div 
+            onClick={() => handleCardClick('low')}
             onMouseMove={handleMouseMove}
             style={{ '--glow-color': 'rgba(59,130,246,0.18)' } as React.CSSProperties}
-            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-blue-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(59,130,246,0.20)] group"
+            className={`glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-blue-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 cursor-pointer group ${
+              severityFilter === 'low' && statusFilter === 'open'
+                ? 'ring-2 ring-blue-500 shadow-[0_0_25px_0_rgba(59,130,246,0.30)] scale-[1.02] border-t border-blue-500/20'
+                : isAnyCardActive
+                  ? 'opacity-40 hover:opacity-100 hover:scale-[1.01]'
+                  : 'hover:shadow-[0_0_25px_0_rgba(59,130,246,0.20)]'
+            }`}
           >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-blue-400 transition-colors">Low</span>
             <div className="flex items-baseline justify-between mt-4">
@@ -453,9 +596,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Resolved Card */}
           <div 
+            onClick={() => handleCardClick('resolved')}
             onMouseMove={handleMouseMove}
             style={{ '--glow-color': 'rgba(16,185,129,0.20)' } as React.CSSProperties}
-            className="glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-emerald-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(16,185,129,0.25)] group col-span-2 md:col-span-1"
+            className={`glass-panel glow-card-interactive rounded-2xl p-5 border-b-4 border-emerald-500 flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300 hover:shadow-[0_0_25px_0_rgba(16,185,129,0.25)] group col-span-2 md:col-span-1 cursor-pointer ${
+              statusFilter === 'resolved'
+                ? 'ring-2 ring-emerald-500 shadow-[0_0_25px_0_rgba(16,185,129,0.35)] scale-[1.02] border-t border-emerald-500/20'
+                : isAnyCardActive
+                  ? 'opacity-40 hover:opacity-100 hover:scale-[1.01]'
+                  : 'hover:shadow-[0_0_25px_0_rgba(16,185,129,0.25)]'
+            }`}
           >
             <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider group-hover:text-emerald-400 transition-colors">Resolved</span>
             <div className="flex items-baseline justify-between mt-4">
@@ -493,11 +643,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </defs>
                 <XAxis dataKey="name" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} dy={10} />
                 <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} dx={-10} />
-                <Tooltip 
-                  contentStyle={{ background: 'rgba(15, 22, 36, 0.9)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}
-                  labelStyle={{ color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}
-                  itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                />
+                <Tooltip content={<CustomAreaTooltip />} />
                 <Area type="monotone" dataKey="issues" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#glowIndigo)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -517,10 +663,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <BarChart data={chartCategoryData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
                   <XAxis type="number" stroke="#475569" fontSize={10} hide />
                   <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={11} width={110} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ background: 'rgba(15, 22, 36, 0.9)', border: '1px solid rgba(6, 182, 212, 0.3)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}
-                    itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                  />
+                  <Tooltip content={<CustomBarTooltip />} />
                   <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={12}>
                     {chartCategoryData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#06b6d4'} />
@@ -595,6 +738,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <option value="resolved">Resolved</option>
                 <option value="dismissed">Dismissed</option>
               </select>
+            </div>
+
+            {/* Export Dropdown Button */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+                className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 border border-indigo-500/20 transition-all cursor-pointer shadow-md"
+              >
+                <Download size={14} />
+                <span>레포트 내보내기</span>
+              </button>
+
+              {exportDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setExportDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-36 glass-panel border border-slate-800 rounded-xl py-1 shadow-2xl bg-slate-950/95 z-20 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <button
+                      onClick={() => handleExport('csv')}
+                      className="w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-slate-900/60 hover:text-white transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      CSV 다운로드
+                    </button>
+                    <button
+                      onClick={() => handleExport('json')}
+                      className="w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-slate-900/60 hover:text-white transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      JSON 다운로드
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

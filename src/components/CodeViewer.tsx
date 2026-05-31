@@ -25,6 +25,109 @@ import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-python';
 
 
+interface DiffLine {
+  type: 'added' | 'removed' | 'normal';
+  value: string;
+  lineNum: number;
+}
+
+function computeLineDiff(A: string[], B: string[]): { originalDiff: DiffLine[]; suggestedDiff: DiffLine[] } {
+  const n = A.length;
+  const m = B.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (A[i - 1].trim() === B[j - 1].trim()) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  let i = n;
+  let j = m;
+  const originalDiff: DiffLine[] = [];
+  const suggestedDiff: DiffLine[] = [];
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && A[i - 1].trim() === B[j - 1].trim()) {
+      originalDiff.push({ type: 'normal', value: A[i - 1], lineNum: i });
+      suggestedDiff.push({ type: 'normal', value: B[j - 1], lineNum: j });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      suggestedDiff.push({ type: 'added', value: B[j - 1], lineNum: j });
+      j--;
+    } else {
+      originalDiff.push({ type: 'removed', value: A[i - 1], lineNum: i });
+      i--;
+    }
+  }
+
+  originalDiff.reverse();
+  suggestedDiff.reverse();
+
+  return { originalDiff, suggestedDiff };
+}
+
+interface DiffCodeBlockProps {
+  code: string;
+  otherCode: string;
+  isOriginal: boolean;
+  filePath: string;
+}
+
+const DiffCodeBlock: React.FC<DiffCodeBlockProps> = ({ code, otherCode, isOriginal, filePath }) => {
+  const language = filePath.endsWith('.py') ? 'python' : 'typescript';
+  const linesOriginal = useMemo(() => code.split('\n'), [code]);
+  const linesSuggested = useMemo(() => otherCode.split('\n'), [otherCode]);
+
+  const diffItems = useMemo(() => {
+    const { originalDiff, suggestedDiff } = computeLineDiff(linesOriginal, linesSuggested);
+    return isOriginal ? originalDiff : suggestedDiff;
+  }, [linesOriginal, linesSuggested, isOriginal]);
+
+  return (
+    <div className="font-mono text-xs py-2 bg-slate-950 overflow-y-auto max-h-[450px] flex-1">
+      {diffItems.map((item, idx) => {
+        const highlighted = Prism.languages[language] 
+          ? Prism.highlight(item.value, Prism.languages[language], language)
+          : item.value;
+        const type = item.type;
+        return (
+          <div 
+            key={idx}
+            className={`flex items-stretch py-0.5 border-l-2 transition-all duration-150 ${
+              type === 'added' 
+                ? 'bg-emerald-500/10 border-emerald-500/50 text-slate-100 hover:bg-emerald-500/15' 
+                : type === 'removed'
+                  ? 'bg-rose-500/10 border-rose-500/50 text-slate-100 hover:bg-rose-500/15'
+                  : 'border-transparent text-slate-300 hover:bg-slate-900/30'
+            }`}
+          >
+            <div className="w-14 select-none text-right pr-3 text-slate-600 font-mono text-[10px] shrink-0 border-r border-slate-900/60 mr-4 flex items-center justify-between">
+              <span className={`text-[10px] font-bold w-3 text-center ${
+                type === 'added' ? 'text-emerald-500' : type === 'removed' ? 'text-rose-500' : 'text-slate-700'
+              }`}>
+                {type === 'added' ? '+' : type === 'removed' ? '-' : ' '}
+              </span>
+              <span>{item.lineNum}</span>
+            </div>
+            <div className="flex-1 overflow-x-auto whitespace-pre pr-4">
+              <code 
+                dangerouslySetInnerHTML={{ __html: highlighted || '&nbsp;' }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+
 interface CodeViewerProps {
   issue: Issue | null;
   onClose: () => void;
@@ -191,11 +294,12 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
                   <span>AS-IS (취약 코드 원문)</span>
                   <span className="text-[9px] text-rose-400 font-bold uppercase tracking-wider bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Vulnerable</span>
                 </div>
-                <pre className="p-4 overflow-x-auto text-xs m-0 flex-1 bg-slate-950">
-                  <code className={`language-${issue.file_path.endsWith('.py') ? 'python' : 'typescript'}`}>
-                    {issue.code_snippet}
-                  </code>
-                </pre>
+                <DiffCodeBlock 
+                  code={issue.code_snippet} 
+                  otherCode={issue.suggestion} 
+                  isOriginal={true} 
+                  filePath={issue.file_path} 
+                />
               </div>
 
               {/* TO-BE (AI suggestion) */}
@@ -217,11 +321,12 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
                     <Sparkles size={9} /> Recommended
                   </span>
                 </div>
-                <pre className="p-4 overflow-x-auto text-xs m-0 flex-1 bg-slate-950">
-                  <code className={`language-${issue.file_path.endsWith('.py') ? 'python' : 'typescript'}`}>
-                    {issue.suggestion}
-                  </code>
-                </pre>
+                <DiffCodeBlock 
+                  code={issue.code_snippet} 
+                  otherCode={issue.suggestion} 
+                  isOriginal={false} 
+                  filePath={issue.file_path} 
+                />
               </div>
             </div>
 
