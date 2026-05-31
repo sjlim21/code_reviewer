@@ -320,7 +320,8 @@ const handleLogin = async () => {
     
     try {
       if (os.platform() === 'win32') {
-        execFileSync('cmd.exe', ['/c', 'start', '', oauthUrl]);
+        const escapedUrl = oauthUrl.replace(/&/g, '^&');
+        execFileSync('cmd.exe', ['/c', 'start', '', escapedUrl]);
       } else {
         const startCmd = os.platform() === 'darwin' ? 'open' : 'xdg-open';
         execFileSync(startCmd, [oauthUrl]);
