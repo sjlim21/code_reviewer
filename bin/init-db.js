@@ -12,9 +12,6 @@ import readline from 'readline';
 import os from 'os';
 import pg from 'pg';
 
-// Supabase SSL 인증서 체인 오류 방지 (self-signed certificate in certificate chain 해결)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 const { Client } = pg;
 
 // ESM __dirname setup

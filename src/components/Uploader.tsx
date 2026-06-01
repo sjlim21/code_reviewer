@@ -351,6 +351,10 @@ export const Uploader: React.FC = () => {
     setErrorMsg('');
     setTotalFilesCount(filesToAnalyze.length);
 
+    let activeProjId = selectedProject?.id || '';
+    let isNewProjectCreated = false;
+    let runId: string | null = null;
+
     try {
       // 2. 파일의 webkitRelativePath 로부터 최상위 폴더 명 추출
       let folderName = 'Local Project';
@@ -366,8 +370,8 @@ export const Uploader: React.FC = () => {
       if (supabase && !session?.user?.id) {
         throw new Error("분석을 수행하려면 로그인 세션이 필요합니다.");
       }
-      let activeProjId = selectedProject?.id || '';
-      let isNewProjectCreated = false;
+      activeProjId = selectedProject?.id || '';
+      isNewProjectCreated = false;
 
       // 3. 폴더명 기반 프로젝트 자동 매핑 / 생성
       setProgress(15);
@@ -425,7 +429,7 @@ export const Uploader: React.FC = () => {
 
       // 4. Supabase에 analysis_runs 레코드 삽입 (상태: running)
       setProgress(25);
-      const runId = crypto.randomUUID();
+      runId = crypto.randomUUID();
       
       if (supabase) {
         const { error: runError } = await supabase
@@ -468,7 +472,7 @@ export const Uploader: React.FC = () => {
             file.name,
             codeContent,
             activeProjId,
-            runId,
+            runId || '',
             session?.provider_token || undefined
           );
           
@@ -477,7 +481,9 @@ export const Uploader: React.FC = () => {
 
           allDetectedIssues.push(...detectedIssues);
         } catch (scanErr) {
-          console.warn(`File analysis failed for ${file.name}, skipping.`, scanErr);
+          console.error(`File analysis failed for ${file.name}:`, scanErr);
+          const errMsg = scanErr instanceof Error ? scanErr.message : String(scanErr);
+          throw new Error(`파일 스캔 실패 (${file.name}): ${errMsg}`, { cause: scanErr });
         } finally {
           completedCount++;
           setCurrentFileIndex(completedCount);
@@ -582,6 +588,26 @@ export const Uploader: React.FC = () => {
       const errorMessage = err instanceof Error ? err.message : '폴더 분석 수행 중 오류가 발생했습니다.';
       setErrorMsg(errorMessage);
       setUploadStatus('idle');
+
+      const supabase = getSupabaseClient();
+      if (supabase && runId) {
+        try {
+          await supabase
+            .from('analysis_runs')
+            .update({ 
+              status: 'failed', 
+              completed_at: new Date().toISOString() 
+            })
+            .eq('id', runId);
+
+          if (isNewProjectCreated && activeProjId) {
+            console.warn(`Deleting project ${activeProjId} due to analysis run failure.`);
+            await supabase.from('projects').delete().eq('id', activeProjId);
+          }
+        } catch (dbErr) {
+          console.error("Failed to update failed status in Supabase:", dbErr);
+        }
+      }
     }
   };
 

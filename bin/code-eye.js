@@ -599,16 +599,21 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
     } catch (e) {}
   }
 
-  let ownerId = 'usr-1';
+  let ownerId;
   try {
     const payloadBase64 = supabaseToken.split('.')[1];
-    if (payloadBase64) {
-      const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-      if (decoded && decoded.sub) {
-        ownerId = decoded.sub;
-      }
+    if (!payloadBase64) {
+      throw new Error('JWT 토큰 페이로드가 누락되었습니다.');
     }
-  } catch (e) {}
+    const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+    if (!decoded || !decoded.sub) {
+      throw new Error('토큰에 사용자 ID가 없습니다.');
+    }
+    ownerId = decoded.sub;
+  } catch (e) {
+    console.error('\x1b[31m[Error] 사용자 세션 정보를 추출할 수 없습니다. 다시 로그인해 주세요.\x1b[0m');
+    process.exit(1);
+  }
 
   const resolvedPath = path.resolve(targetPath);
   let activeProjectId = projectId;
@@ -831,12 +836,21 @@ const handleImport = async (jsonFilePath, projectId) => {
   const supabaseToken = process.env.SUPABASE_ACCESS_TOKEN || config.supabase_access_token || '';
   const googleToken = config.google_provider_token || '';
 
-  let ownerId = 'usr-1';
+  let ownerId;
   try {
     const payloadBase64 = supabaseToken.split('.')[1];
+    if (!payloadBase64) {
+      throw new Error('JWT 토큰 페이로드가 누락되었습니다.');
+    }
     const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-    ownerId = decoded.sub || ownerId;
-  } catch (e) {}
+    if (!decoded || !decoded.sub) {
+      throw new Error('토큰에 사용자 ID가 없습니다.');
+    }
+    ownerId = decoded.sub;
+  } catch (e) {
+    console.error('\x1b[31m[Error] 사용자 세션 정보를 추출할 수 없습니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
+    process.exit(1);
+  }
 
   const dbHeaders = {
     'Content-Type': 'application/json',

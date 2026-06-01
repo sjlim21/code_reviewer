@@ -47,6 +47,22 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+function insertSorted(arr: Issue[], item: Issue): Issue[] {
+  let low = 0;
+  let high = arr.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (item.priority_score > arr[mid].priority_score) {
+      high = mid;
+    } else {
+      low = mid + 1;
+    }
+  }
+  const result = [...arr];
+  result.splice(low, 0, item);
+  return result;
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'settings'>('dashboard');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -282,7 +298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (payload.eventType === 'INSERT') {
             const ins = payload.new as Issue;
             addEventLog(`[실시간 동기화] 새로운 결함 감지: [${ins.severity.toUpperCase()}] ${ins.title}`, 'warning');
-            setIssues(prev => [ins, ...prev].sort((a, b) => b.priority_score - a.priority_score));
+            setIssues(prev => insertSorted(prev, ins));
           } else if (payload.eventType === 'UPDATE') {
             const upd = payload.new as Issue;
             addEventLog(`[실시간 동기화] 결함 업데이트됨: [${upd.status}] ${upd.title}`, 'info');
