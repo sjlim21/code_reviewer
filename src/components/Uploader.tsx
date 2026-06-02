@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FolderOpen, Folder, FileCode, AlertCircle, CheckCircle, RefreshCw, Trash2, Play } from 'lucide-react';
 import { getSupabaseClient, type Issue, type Project } from '../supabase';
 import { analyzeCodeWithGemini } from '../geminiAnalyzer';
+import { analyzeCodeWithClaude } from '../claudeAnalyzer';
 
 
 interface FileSystemEntry {
@@ -39,18 +40,19 @@ const traverseFileTree = async (entry: FileSystemEntry, path: string = ''): Prom
     } else if (entry.isDirectory) {
       const dirEntry = entry as FileSystemDirectoryEntry;
       const dirReader = dirEntry.createReader();
-      const readEntries = () => {
+      const allEntries: FileSystemEntry[] = [];
+      const readAll = () => {
         dirReader.readEntries(async (entries) => {
           if (entries.length === 0) {
-            resolve([]);
+            const filePromises = allEntries.map(e => traverseFileTree(e, path + entry.name + '/'));
+            resolve((await Promise.all(filePromises)).flat());
             return;
           }
-          const filePromises = entries.map(subEntry => traverseFileTree(subEntry, path + entry.name + '/'));
-          const filesArrays = await Promise.all(filePromises);
-          resolve(filesArrays.flat());
+          allEntries.push(...entries);
+          readAll();
         }, () => resolve([]));
       };
-      readEntries();
+      readAll();
     } else {
       resolve([]);
     }
@@ -164,7 +166,8 @@ export const Uploader: React.FC = () => {
     session,
     projects,
     setSelectedProject: onProjectSelected,
-    setProjects
+    setProjects,
+    aiProvider
   } = useAppContext();
 
   // Helper for creating a new project in context
@@ -346,6 +349,13 @@ export const Uploader: React.FC = () => {
       return;
     }
 
+    const totalBytes = filesToAnalyze.reduce((acc, f) => acc + f.size, 0);
+    const MAX_TOTAL_BYTES = 10 * 1024 * 1024; // 10MB
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      setErrorMsg(`프로젝트 전체 크기(${(totalBytes / 1024 / 1024).toFixed(1)}MB)가 브라우저 분석 한도(10MB)를 초과합니다. 일부 파일을 제외하거나 CLI를 사용해 주세요.`);
+      return;
+    }
+
     setUploadStatus('uploading');
     setProgress(5);
     setErrorMsg('');
@@ -467,14 +477,10 @@ export const Uploader: React.FC = () => {
             reader.readAsText(file);
           });
 
-          // Gemini API 스캔
-          const detectedIssues = await analyzeCodeWithGemini(
-            file.name,
-            codeContent,
-            activeProjId,
-            runId || '',
-            session?.provider_token || undefined
-          );
+          // AI 제공자에 따라 분석 엔진 선택
+          const detectedIssues = aiProvider === 'claude'
+            ? await analyzeCodeWithClaude(file.name, codeContent, activeProjId, runId || '')
+            : await analyzeCodeWithGemini(file.name, codeContent, activeProjId, runId || '', session?.provider_token || undefined);
           
           // Free string reference immediately to allow garbage collection
           codeContent = null;

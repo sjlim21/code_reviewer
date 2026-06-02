@@ -390,12 +390,11 @@ export const Dashboard: React.FC = () => {
     for (let i = 29; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })
-        .replace('. ', '-')
-        .replace('.', '')
-        .trim();
+      const utcDateStr = d.toISOString().split('T')[0]; // YYYY-MM-DD UTC
+      const [, mm, dd] = utcDateStr.split('-');
+      const dateStr = `${mm}-${dd}`;
       dates.push({
-        dateRaw: d.toISOString().split('T')[0],
+        dateRaw: utcDateStr,
         name: dateStr,
         open: 0,
         resolved: 0
@@ -404,7 +403,7 @@ export const Dashboard: React.FC = () => {
 
     // 각 날짜별 누적 결함 수 계산
     dates.forEach(d => {
-      const targetTime = new Date(d.dateRaw + 'T23:59:59').getTime();
+      const targetTime = new Date(d.dateRaw + 'T23:59:59Z').getTime();
       let openCount = 0;
       let resolvedCount = 0;
 

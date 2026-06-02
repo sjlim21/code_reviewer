@@ -66,14 +66,16 @@ const DEFAULT_RULE_DEFINITIONS = [
 ];
 
 export const Settings: React.FC = () => {
-  const { 
-    selectedProject: project, 
-    isUsingRealDB, 
-    session, 
+  const {
+    selectedProject: project,
+    isUsingRealDB,
+    session,
     isDemoSession,
     eventLogs,
     clearEventLogs,
-    addEventLog
+    addEventLog,
+    aiProvider,
+    setAiProvider
   } = useAppContext();
 
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -130,8 +132,8 @@ export const Settings: React.FC = () => {
         ? import.meta.env.VITE_SUPABASE_ANON_KEY 
         : deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '')
     );
-    setSlackUrl(deobfuscate(localStorage.getItem('code_eye_slack_webhook_url') || ''));
-    setDiscordUrl(deobfuscate(localStorage.getItem('code_eye_discord_webhook_url') || ''));
+    setSlackUrl(deobfuscate(sessionStorage.getItem('code_eye_slack_webhook_url') || ''));
+    setDiscordUrl(deobfuscate(sessionStorage.getItem('code_eye_discord_webhook_url') || ''));
     setIgnorePaths(localStorage.getItem('code_eye_ignore_paths') || 'node_modules/, dist/, build/, *.min.js');
     
     const savedLinters = localStorage.getItem('code_eye_selected_linters');
@@ -176,8 +178,8 @@ export const Settings: React.FC = () => {
     if (!isEnvSupabaseKeyActive) {
       sessionStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, obfuscate(supabaseKey.trim()));
     }
-    localStorage.setItem('code_eye_slack_webhook_url', obfuscate(slackUrl.trim()));
-    localStorage.setItem('code_eye_discord_webhook_url', obfuscate(discordUrl.trim()));
+    sessionStorage.setItem('code_eye_slack_webhook_url', obfuscate(slackUrl.trim()));
+    sessionStorage.setItem('code_eye_discord_webhook_url', obfuscate(discordUrl.trim()));
     localStorage.setItem('code_eye_ignore_paths', ignorePaths.trim());
     localStorage.setItem('code_eye_selected_linters', JSON.stringify(selectedLinters));
     localStorage.setItem('code_eye_rules_config', JSON.stringify(rulesConfig));
@@ -245,6 +247,44 @@ export const Settings: React.FC = () => {
             <p className="text-[10px] text-slate-600">
               * 설정 시 Supabase 대시보드에서 `setup.sql`을 실행해 테이블이 준비되어 있어야 실시간 분석 저장이 가능합니다.
             </p>
+          </div>
+
+          {/* AI 제공자 선택 */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+              <Shield size={14} />
+              AI 분석 엔진 선택
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              {(['gemini', 'claude'] as const).map(provider => {
+                const isActive = aiProvider === provider;
+                const label = provider === 'gemini' ? 'Google Gemini' : 'Anthropic Claude';
+                const sub = provider === 'gemini'
+                  ? 'gemini-2.5-flash · 고속 · 1M 컨텍스트'
+                  : 'claude-sonnet-4-6 · 고품질 · 200k 컨텍스트';
+                return (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => setAiProvider(provider)}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      isActive
+                        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+                        : 'border-slate-700 bg-slate-900/50 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-xs font-bold mb-0.5">{label}</div>
+                    <div className="text-[10px] opacity-70">{sub}</div>
+                    {isActive && <div className="text-[10px] text-indigo-400 mt-1">✓ 활성</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {aiProvider === 'claude' && (
+              <p className="text-[10px] text-emerald-400 bg-emerald-500/10 rounded-lg px-3 py-2 border border-emerald-500/20">
+                ✓ API 키는 Supabase Edge Function(<strong>claude-proxy</strong>)이 서버에서 관리합니다. 브라우저에 노출되지 않습니다.
+              </p>
+            )}
           </div>
 
           {/* 2. Authentication & Static Analysis Engine Info Card */}

@@ -229,7 +229,15 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- RLS 정책 생성
 DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
-CREATE POLICY "profiles_select" ON public.profiles FOR SELECT USING (TRUE);
+CREATE POLICY "profiles_select" ON public.profiles
+  FOR SELECT USING (
+    auth.uid() = id
+    OR EXISTS (
+      SELECT 1 FROM public.project_members pm
+      WHERE pm.user_id = public.profiles.id
+        AND public.is_project_member(pm.project_id)
+    )
+  );
 
 DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 CREATE POLICY "profiles_update_own" ON public.profiles FOR UPDATE USING (auth.uid() = id);
@@ -261,7 +269,7 @@ DROP POLICY IF EXISTS "analysis_runs_insert" ON public.analysis_runs;
 CREATE POLICY "analysis_runs_insert" ON public.analysis_runs FOR INSERT WITH CHECK (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "analysis_runs_select" ON public.analysis_runs;
-CREATE POLICY "analysis_runs_select" ON public.analysis_runs FOR SELECT USING (TRUE);
+CREATE POLICY "analysis_runs_select" ON public.analysis_runs FOR SELECT USING (public.is_project_member(project_id));
 
 DROP POLICY IF EXISTS "notifications_own" ON public.notifications;
 CREATE POLICY "notifications_own" ON public.notifications FOR ALL USING (user_id = auth.uid());
@@ -302,4 +310,119 @@ CREATE INDEX IF NOT EXISTS idx_issues_created_at ON public.issues(created_at);
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_project_id ON public.analysis_runs(project_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_created_at ON public.analysis_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_project_members_user_proj ON public.project_members(user_id, project_id);
+
+-- 16. CODE EYE Agent v2.0 - 추가 컬럼 및 트리거/뷰 설정
+ALTER TABLE public.issues
+  ADD COLUMN IF NOT EXISTS confidence_score   NUMERIC(3,2) DEFAULT 0.00 CHECK (confidence_score BETWEEN 0 AND 1),
+  ADD COLUMN IF NOT EXISTS human_review_required BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS rag_references     JSONB DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS score_breakdown    JSONB DEFAULT '{}';
+
+CREATE OR REPLACE FUNCTION public.sync_analysis_run_counts()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE public.analysis_runs SET
+    issues_found   = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id),
+    critical_count = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id AND severity = 'critical'),
+    high_count     = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id AND severity = 'high'),
+    medium_count   = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id AND severity = 'medium'),
+    low_count      = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id AND severity = 'low'),
+    info_count     = (SELECT COUNT(*)    FROM public.issues WHERE analysis_run_id = NEW.analysis_run_id AND severity = 'info'),
+    status         = 'completed',
+    completed_at   = NOW()
+  WHERE id = NEW.analysis_run_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS sync_counts_on_issue_insert ON public.issues;
+CREATE TRIGGER sync_counts_on_issue_insert
+  AFTER INSERT ON public.issues
+  FOR EACH ROW EXECUTE FUNCTION public.sync_analysis_run_counts();
+
+CREATE OR REPLACE VIEW public.pending_human_review AS
+  SELECT
+    i.id, i.title, i.severity, i.priority_score,
+    i.confidence_score, i.file_path, i.line_start,
+    p.name AS project_name,
+    ar.created_at AS analyzed_at
+  FROM public.issues i
+  JOIN public.projects p ON i.project_id = p.id
+  JOIN public.analysis_runs ar ON i.analysis_run_id = ar.id
+  WHERE i.human_review_required = TRUE
+    AND i.status = 'open'
+  ORDER BY i.priority_score DESC;
+
+-- 17. RAG 지식 베이스 (pgvector)
+-- Gemini text-embedding-004 출력 차원: 768
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- issue_status ENUM에 pending_review 추가
+ALTER TYPE public.issue_status ADD VALUE IF NOT EXISTS 'pending_review';
+
+CREATE TABLE IF NOT EXISTS public.rag_knowledge (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source      TEXT NOT NULL,
+  ref_id      TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  description TEXT NOT NULL,
+  languages   TEXT[],
+  severity    TEXT,
+  embedding   VECTOR(768),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source, ref_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_embedding ON public.rag_knowledge
+  USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_rag_language ON public.rag_knowledge
+  USING gin (languages);
+
+ALTER TABLE public.rag_knowledge ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "rag_knowledge_select" ON public.rag_knowledge;
+CREATE POLICY "rag_knowledge_select" ON public.rag_knowledge
+  FOR SELECT USING (TRUE);
+
+DROP POLICY IF EXISTS "rag_knowledge_insert_service" ON public.rag_knowledge;
+CREATE POLICY "rag_knowledge_insert_service" ON public.rag_knowledge
+  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+
+DROP POLICY IF EXISTS "rag_knowledge_update_service" ON public.rag_knowledge;
+CREATE POLICY "rag_knowledge_update_service" ON public.rag_knowledge
+  FOR UPDATE USING (auth.role() = 'service_role');
+
+CREATE OR REPLACE FUNCTION public.match_rag_knowledge(
+  query_embedding VECTOR(768),
+  match_count     INT DEFAULT 5,
+  target_language TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  id          UUID,
+  source      TEXT,
+  ref_id      TEXT,
+  title       TEXT,
+  description TEXT,
+  severity    TEXT,
+  similarity  FLOAT
+)
+LANGUAGE sql STABLE AS $$
+  SELECT
+    rk.id,
+    rk.source,
+    rk.ref_id,
+    rk.title,
+    rk.description,
+    rk.severity,
+    1 - (rk.embedding <=> query_embedding) AS similarity
+  FROM public.rag_knowledge rk
+  WHERE
+    rk.embedding IS NOT NULL
+    AND (target_language IS NULL OR rk.languages @> ARRAY[target_language])
+  ORDER BY rk.embedding <=> query_embedding
+  LIMIT match_count;
+$$;
 

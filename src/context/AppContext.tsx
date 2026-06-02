@@ -16,6 +16,8 @@ export interface EventLog {
   type: 'info' | 'success' | 'warning' | 'error';
 }
 
+export type AiProvider = 'gemini' | 'claude';
+
 interface AppContextType {
   activeTab: 'dashboard' | 'upload' | 'settings';
   setActiveTab: React.Dispatch<React.SetStateAction<'dashboard' | 'upload' | 'settings'>>;
@@ -31,6 +33,8 @@ interface AppContextType {
   setIsUsingRealDB: React.Dispatch<React.SetStateAction<boolean>>;
   theme: 'indigo' | 'emerald' | 'amber';
   setTheme: React.Dispatch<React.SetStateAction<'indigo' | 'emerald' | 'amber'>>;
+  aiProvider: AiProvider;
+  setAiProvider: (p: AiProvider) => void;
   session: Session | null;
   setSession: React.Dispatch<React.SetStateAction<Session | null>>;
   isDemoSession: boolean;
@@ -46,6 +50,11 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const deobfuscateStr = (str: string): string => {
+  if (!str) return '';
+  try { return decodeURIComponent(atob(str)); } catch { return ''; }
+};
 
 function insertSorted(arr: Issue[], item: Issue): Issue[] {
   let low = 0;
@@ -102,6 +111,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('codeeye-theme', theme);
   }, [theme]);
   
+  const [aiProvider, setAiProviderState] = useState<AiProvider>(() =>
+    (localStorage.getItem('codeeye-ai-provider') as AiProvider) || 'gemini'
+  );
+  const setAiProvider = (p: AiProvider) => {
+    setAiProviderState(p);
+    localStorage.setItem('codeeye-ai-provider', p);
+  };
+
   const [session, setSession] = useState<Session | null>(null);
   const [isDemoSession, setIsDemoSession] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(() => !getSupabaseClient());
@@ -368,15 +385,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addEventLog(`[이슈 변경 완료] 로컬 세션 상태 업데이트 완료.`, 'success');
     }
 
-    // Webhook simulation if URL exists
-    const slack = localStorage.getItem('code_eye_slack_webhook_url');
-    const discord = localStorage.getItem('code_eye_discord_webhook_url');
+    // Real webhook delivery via sessionStorage (obfuscated)
+    const slack = deobfuscateStr(sessionStorage.getItem('code_eye_slack_webhook_url') || '');
+    const discord = deobfuscateStr(sessionStorage.getItem('code_eye_discord_webhook_url') || '');
     if (slack || discord) {
       addEventLog(`[웹훅 연동] 결함 상태 변경 이벤트 알림 전송 시작...`, 'info');
-      setTimeout(() => {
-        if (slack) addEventLog(`[웹훅 연동] Slack 채널로 [${newStatus}] 알림 전송 성공`, 'success');
-        if (discord) addEventLog(`[웹훅 연동] Discord 채널로 [${newStatus}] 알림 전송 성공`, 'success');
-      }, 300);
+      const payload = JSON.stringify({ text: `[CodeEye] 이슈 상태 변경: ${newStatus}` });
+      if (slack) {
+        fetch(slack, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+          .then(() => addEventLog(`[웹훅 연동] Slack 채널로 [${newStatus}] 알림 전송 성공`, 'success'))
+          .catch((e) => addEventLog(`[웹훅 연동] Slack 알림 전송 실패: ${String(e)}`, 'error'));
+      }
+      if (discord) {
+        fetch(discord, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+          .then(() => addEventLog(`[웹훅 연동] Discord 채널로 [${newStatus}] 알림 전송 성공`, 'success'))
+          .catch((e) => addEventLog(`[웹훅 연동] Discord 알림 전송 실패: ${String(e)}`, 'error'));
+      }
     }
   };
 
@@ -386,16 +410,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTab('dashboard');
     addEventLog(`[진단 완료] 정적 진단이 완료되었습니다. (감지된 결함: ${newIssues.length}건)`, 'success');
 
-    // Webhook simulation if URL exists and contains issues
+    // Real webhook delivery for new issues
     if (newIssues.length > 0) {
-      const slack = localStorage.getItem('code_eye_slack_webhook_url');
-      const discord = localStorage.getItem('code_eye_discord_webhook_url');
+      const slack = deobfuscateStr(sessionStorage.getItem('code_eye_slack_webhook_url') || '');
+      const discord = deobfuscateStr(sessionStorage.getItem('code_eye_discord_webhook_url') || '');
       if (slack || discord) {
         addEventLog(`[웹훅 연동] 새로운 취약점 발견 알림 웹훅 전송 시작...`, 'info');
-        setTimeout(() => {
-          if (slack) addEventLog(`[웹훅 연동] Slack 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success');
-          if (discord) addEventLog(`[웹훅 연동] Discord 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success');
-        }, 500);
+        const payload = JSON.stringify({ text: `[CodeEye] 분석 완료: ${newIssues.length}건 취약점 감지` });
+        if (slack) {
+          fetch(slack, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+            .then(() => addEventLog(`[웹훅 연동] Slack 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success'))
+            .catch((e) => addEventLog(`[웹훅 연동] Slack 알림 전송 실패: ${String(e)}`, 'error'));
+        }
+        if (discord) {
+          fetch(discord, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+            .then(() => addEventLog(`[웹훅 연동] Discord 채널로 분석 알림 전송 완료 (${newIssues.length}건 감지)`, 'success'))
+            .catch((e) => addEventLog(`[웹훅 연동] Discord 알림 전송 실패: ${String(e)}`, 'error'));
+        }
       }
     }
   };
@@ -477,6 +508,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsUsingRealDB,
       theme,
       setTheme,
+      aiProvider,
+      setAiProvider,
       session,
       setSession,
       isDemoSession,

@@ -112,11 +112,21 @@ export interface Issue {
   line_start: number;
   line_end: number;
   code_snippet: string;
-  status: 'open' | 'in_progress' | 'resolved' | 'dismissed' | 'wont_fix';
+  status: 'open' | 'in_progress' | 'resolved' | 'dismissed' | 'wont_fix' | 'pending_review';
   assignee_id: string | null;
   resolved_by: string | null;
   resolved_at: string | null;
   created_at: string;
+  confidence_score?: number;
+  human_review_required?: boolean;
+  rag_references?: { source: string; id: string; title: string }[];
+  score_breakdown?: {
+    severity_base: number;
+    impact_factor: number;
+    complexity_inv: number;
+    attack_surface: number;
+  };
+  effort_minutes?: number | null;
 }
 
 export interface IssueComment {

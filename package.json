@@ -11,6 +11,7 @@
     "init-db": "node bin/init-db.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@supabase/supabase-js": "^2.106.2",
     "lucide-react": "^1.17.0",
     "pg": "^8.11.3",

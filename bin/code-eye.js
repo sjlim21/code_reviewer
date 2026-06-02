@@ -105,7 +105,7 @@ const ensureSupabaseCredentials = async () => {
     ...currentConfig,
     supabase_url: SUPABASE_URL,
     supabase_anon_key: SUPABASE_ANON_KEY
-  }, null, 2));
+  }, null, 2), { encoding: 'utf-8', mode: 0o600 });
 
   console.log('\x1b[32m- Supabase 설정이 로컬 세션 파일에 임시 캐싱되었습니다.\x1b[0m\n');
   return true;
@@ -120,12 +120,13 @@ const ensureGcpCredentials = async (customGcpProjectId) => {
       ...currentConfig,
       gcp_project_id: customGcpProjectId
     };
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2));
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2), { encoding: 'utf-8', mode: 0o600 });
     gcpProjectId = customGcpProjectId;
   }
 
-  console.log(`[Debug] gcpProjectId 후보군: custom=${customGcpProjectId}, env.process=${process.env.VITE_GCP_PROJECT_ID}, env.file=${env.VITE_GCP_PROJECT_ID}, config.json=${currentConfig.gcp_project_id}`);
-  console.log(`[Debug] 최종 매핑된 gcpProjectId: "${gcpProjectId}"`);
+  if (process.env.CODE_EYE_DEBUG) {
+    console.log(`[Debug] gcpProjectId: ${gcpProjectId ? 'found' : 'not found'}`);
+  }
 
   if (gcpProjectId) return gcpProjectId;
 
@@ -143,7 +144,7 @@ const ensureGcpCredentials = async (customGcpProjectId) => {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
     ...currentConfig,
     gcp_project_id: gcpProjectId
-  }, null, 2));
+  }, null, 2), { encoding: 'utf-8', mode: 0o600 });
 
   console.log('\x1b[32m- Google Cloud Project ID가 로컬 세션 파일에 임시 캐싱되었습니다.\x1b[0m\n');
   return gcpProjectId;
@@ -221,7 +222,7 @@ const handleLogin = async () => {
   const port = 54321;
   let timeoutId;
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const parsedUrl = new URL(req.url || '', `http://localhost:${port}`);
     const pathname = parsedUrl.pathname;
 
@@ -242,7 +243,11 @@ const handleLogin = async () => {
               const refreshToken = params.get('refresh_token');
               const providerToken = params.get('provider_token');
               if (accessToken) {
-                fetch('/save-token?access_token=' + encodeURIComponent(accessToken) + '&provider_token=' + encodeURIComponent(providerToken || '') + '&refresh_token=' + encodeURIComponent(refreshToken || ''))
+                fetch('/save-token', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ access_token: accessToken, provider_token: providerToken || '', refresh_token: refreshToken || '' })
+                })
                   .then(() => {
                     document.body.innerHTML = '<h1 style="color: #10b981;">인증 완벽 성공!</h1><p>이 웹 페이지 창을 닫고 터미널 창으로 돌아가 주셔도 안전합니다.</p>';
                   })
@@ -258,9 +263,13 @@ const handleLogin = async () => {
         </html>
       `);
     } else if (pathname === '/save-token') {
-      const accessToken = parsedUrl.searchParams.get('access_token') || '';
-      const providerToken = parsedUrl.searchParams.get('provider_token') || '';
-      const refreshToken = parsedUrl.searchParams.get('refresh_token') || '';
+      let rawBody = '';
+      for await (const chunk of req) { rawBody += chunk; }
+      let parsedBody = {};
+      try { parsedBody = JSON.parse(rawBody); } catch { /* use empty object */ }
+      const accessToken = parsedBody.access_token || '';
+      const providerToken = parsedBody.provider_token || '';
+      const refreshToken = parsedBody.refresh_token || '';
 
       if (accessToken) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -272,7 +281,7 @@ const handleLogin = async () => {
           supabase_refresh_token: refreshToken,
           google_provider_token: providerToken,
           saved_at: new Date().toISOString()
-        }, null, 2));
+        }, null, 2), { encoding: 'utf-8', mode: 0o600 });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
@@ -402,7 +411,7 @@ const refreshSessionIfNeeded = async () => {
         supabase_refresh_token: data.refresh_token || refreshToken,
         google_provider_token: data.provider_token || currentConfig.google_provider_token || '',
         saved_at: new Date().toISOString()
-      }, null, 2));
+      }, null, 2), { encoding: 'utf-8', mode: 0o600 });
 
       // Update in-memory values
       SUPABASE_URL = currentConfig.supabase_url || SUPABASE_URL;
@@ -554,6 +563,314 @@ const getAgentSystemPrompt = () => {
   return `You are a static code analyzer. Return issues matched to the requested JSON Schema.`;
 };
 
+const loadAgentPrompt = (name) => {
+  const p = path.join(PROJECT_ROOT, 'src', 'agents', name);
+  return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
+};
+
+// ----------------------------------------------------
+// 7-A. Node.js 호환 Gemini API 호출 함수
+// ----------------------------------------------------
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const callGeminiNode = async (systemPrompt, userPrompt, responseSchema, retries = 3) => {
+  const apiKey = GEMINI_API_KEY;
+  if (!apiKey) throw new Error('VITE_GEMINI_API_KEY 없음');
+  const modelName = process.env.VITE_GEMINI_MODEL || env.VITE_GEMINI_MODEL || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+
+  const body = {
+    contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+    ...(responseSchema ? { generationConfig: { responseMimeType: 'application/json', responseSchema } } : {})
+  };
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(body)
+    });
+
+    if (res.status === 429) {
+      const waitMs = Math.min(60000, 15000 * Math.pow(2, attempt));
+      console.log(`\x1b[33m  [Rate Limit] ${Math.round(waitMs/1000)}초 대기 후 재시도 (${attempt + 1}/${retries + 1})...\x1b[0m`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      const status = res.status;
+      if (status === 401 || status === 403) throw new Error('Gemini API 인증 오류. API 키 확인 필요.');
+      throw new Error(`Gemini API Error ${status}: ${errText}`);
+    }
+
+    const json = await res.json();
+    const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error('Gemini 빈 응답');
+    return rawText;
+  }
+  throw new Error('Gemini API rate limit 초과 — 최대 재시도 횟수 도달');
+};
+
+const parseJsonSafe = (text, fallbackPattern) => {
+  try { return JSON.parse(text); } catch (_) {}
+  const match = text.match(fallbackPattern || /\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch (_) {} }
+  return null;
+};
+
+// ----------------------------------------------------
+// 7-B. 단일 파일 Gemini 4단계 분석 파이프라인 (Node.js)
+// ----------------------------------------------------
+const analyzeFileWithGemini = async (fileInfo, runId, projectId) => {
+  const { name: fileName, content: codeContent, relPath } = fileInfo;
+  if (!codeContent || codeContent.trim().length === 0) return [];
+  if (codeContent.length > 512 * 1024) {
+    console.log(`\x1b[33m  - [Skip] ${relPath}: 파일 크기 초과 (>512KB)\x1b[0m`);
+    return [];
+  }
+
+  const parserPrompt = loadAgentPrompt('parser_agent.md');
+  const specialistCppPrompt = loadAgentPrompt('specialist_cpp.md');
+  const specialistPyGoPrompt = loadAgentPrompt('specialist_python_go.md');
+  const specialistJsTsPrompt = loadAgentPrompt('specialist_jsts.md');
+  const specialistJvmPrompt = loadAgentPrompt('specialist_jvm_clr.md');
+  const generalPrompt = loadAgentPrompt('code-reviewer-agent.md');
+  const verifierPrompt = loadAgentPrompt('verifier_agent.md');
+  const scorerPrompt = loadAgentPrompt('scorer_agent.md');
+  const reporterPrompt = loadAgentPrompt('reporter_agent.md');
+
+  // [1] Parser Agent
+  console.log(`\x1b[34m  [1/4 Parser] ${relPath}\x1b[0m`);
+  const parserSchema = {
+    type: "OBJECT",
+    properties: {
+      file_name: { type: "STRING" },
+      language: { type: "STRING" },
+      complexity_hint: { type: "STRING", enum: ["low", "medium", "high"] },
+      dependencies: { type: "ARRAY", items: { type: "STRING" } },
+      chunks: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            chunk_id: { type: "STRING" },
+            line_start: { type: "INTEGER" },
+            line_end: { type: "INTEGER" },
+            context_summary: { type: "STRING" },
+            content: { type: "STRING" }
+          },
+          required: ["chunk_id", "line_start", "line_end", "context_summary", "content"]
+        }
+      }
+    },
+    required: ["file_name", "language", "complexity_hint", "dependencies", "chunks"]
+  };
+
+  const parserText = await callGeminiNode(parserPrompt, `File Name: ${fileName}\nContent:\n\`\`\`\n${codeContent}\n\`\`\``, parserSchema);
+  const parsedResult = parseJsonSafe(parserText);
+  if (!parsedResult || !Array.isArray(parsedResult.chunks)) {
+    console.log(`\x1b[33m  - [Parser] ${relPath}: 파싱 실패, 건너뜀\x1b[0m`);
+    return [];
+  }
+
+  const chunks = parsedResult.chunks;
+  const detectedLanguage = (parsedResult.language || '').toLowerCase().trim();
+
+  // [2] Language Router
+  let specialistPrompt = generalPrompt;
+  let routingLabel = 'general';
+  const ext = path.extname(fileName).toLowerCase();
+  if (detectedLanguage === 'cpp' || detectedLanguage === 'c' || ['.cpp', '.c', '.h'].includes(ext)) {
+    specialistPrompt = specialistCppPrompt; routingLabel = 'cpp';
+  } else if (['typescript', 'javascript', 'tsx', 'jsx'].includes(detectedLanguage) || ['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
+    specialistPrompt = specialistJsTsPrompt; routingLabel = 'js/ts';
+  } else if (['python', 'go'].includes(detectedLanguage) || ['.py', '.go'].includes(ext)) {
+    specialistPrompt = specialistPyGoPrompt; routingLabel = 'python/go';
+  } else if (['java', 'csharp', 'cs', 'kotlin'].includes(detectedLanguage) || ['.java', '.cs', '.kt'].includes(ext)) {
+    specialistPrompt = specialistJvmPrompt; routingLabel = 'jvm/clr';
+  }
+  console.log(`\x1b[34m  [2/4 Specialist:${routingLabel}] ${relPath} (${chunks.length} chunks)\x1b[0m`);
+
+  // [3] Specialist Analyst (병렬)
+  const specialistSchema = {
+    type: "OBJECT",
+    properties: {
+      chunk_id: { type: "STRING" },
+      raw_issues: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            analyst_issue_id: { type: "STRING" },
+            title: { type: "STRING" },
+            description: { type: "STRING" },
+            severity_suggestion: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+            category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "dependency", "test_coverage", "other"] },
+            file_path: { type: "STRING" },
+            line_start: { type: "INTEGER" },
+            line_end: { type: "INTEGER" },
+            code_snippet: { type: "STRING" },
+            as_is: { type: "STRING" },
+            to_be: { type: "STRING" },
+            confidence_raw: { type: "NUMBER" }
+          },
+          required: ["analyst_issue_id", "title", "description", "severity_suggestion", "category", "file_path", "line_start", "line_end", "code_snippet", "as_is", "to_be", "confidence_raw"]
+        }
+      }
+    },
+    required: ["chunk_id", "raw_issues"]
+  };
+
+  const specialistResults = await Promise.all(chunks.map(async (chunk) => {
+    try {
+      const prompt = JSON.stringify({
+        chunk_id: chunk.chunk_id, language: parsedResult.language, file_name: fileName,
+        line_start: chunk.line_start, line_end: chunk.line_end,
+        context_summary: chunk.context_summary, dependencies: parsedResult.dependencies, content: chunk.content
+      });
+      const text = await callGeminiNode(specialistPrompt, prompt, specialistSchema);
+      return parseJsonSafe(text) || { chunk_id: chunk.chunk_id, raw_issues: [] };
+    } catch (err) {
+      console.error(`\x1b[31m  - [Specialist Error] chunk ${chunk.chunk_id}: ${err.message}\x1b[0m`);
+      return { chunk_id: chunk.chunk_id, raw_issues: [] };
+    }
+  }));
+
+  const rawIssues = specialistResults.flatMap(r => r.raw_issues || []);
+  if (rawIssues.length === 0) {
+    console.log(`\x1b[32m  - [Specialist] ${relPath}: 이슈 없음\x1b[0m`);
+    return [];
+  }
+  console.log(`\x1b[33m  - [Specialist] ${rawIssues.length}개 원시 이슈 감지\x1b[0m`);
+
+  // RAG 단계 생략 (CLI에서 Supabase RPC 직접 호출 복잡) - rag_references는 빈 배열
+  const issuesWithRag = rawIssues.map(i => ({ ...i, rag_references: [] }));
+
+  // [3] Verifier Agent
+  console.log(`\x1b[34m  [3/4 Verifier] ${relPath}\x1b[0m`);
+  const verifierSchema = {
+    type: "OBJECT",
+    properties: {
+      verified_issues: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            analyst_issue_id: { type: "STRING" },
+            is_false_positive: { type: "BOOLEAN" },
+            severity_original: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+            severity_verified: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+            severity_changed: { type: "BOOLEAN" },
+            severity_change_reason: { type: "STRING", nullable: true },
+            duplicate_of: { type: "STRING", nullable: true },
+            affected_lines: { type: "ARRAY", items: { type: "INTEGER" } },
+            confidence_verified: { type: "NUMBER" },
+            human_review_required: { type: "BOOLEAN" },
+            rag_references: { type: "ARRAY", items: { type: "OBJECT", properties: { source: { type: "STRING" }, id: { type: "STRING" }, title: { type: "STRING" } }, required: ["source", "id", "title"] } },
+            verifier_note: { type: "STRING" }
+          },
+          required: ["analyst_issue_id", "is_false_positive", "severity_original", "severity_verified", "severity_changed", "severity_change_reason", "duplicate_of", "affected_lines", "confidence_verified", "human_review_required", "rag_references", "verifier_note"]
+        }
+      },
+      summary: {
+        type: "OBJECT",
+        properties: { total_raw: { type: "INTEGER" }, false_positives_removed: { type: "INTEGER" }, severity_downgraded: { type: "INTEGER" }, duplicates_merged: { type: "INTEGER" }, human_review_required: { type: "INTEGER" }, passed: { type: "INTEGER" } },
+        required: ["total_raw", "false_positives_removed", "severity_downgraded", "duplicates_merged", "human_review_required", "passed"]
+      }
+    },
+    required: ["verified_issues", "summary"]
+  };
+
+  const verifierText = await callGeminiNode(verifierPrompt, JSON.stringify({
+    file_name: fileName, language: parsedResult.language, full_source: codeContent, raw_issues: issuesWithRag
+  }), verifierSchema);
+
+  const verifierResult = parseJsonSafe(verifierText);
+  const verifiedIssues = verifierResult?.verified_issues || [];
+
+  // [4] Reporter Agent (Scorer 통합)
+  console.log(`\x1b[34m  [4/4 Reporter] ${relPath}\x1b[0m`);
+  const reporterSchema = {
+    type: "ARRAY",
+    items: {
+      type: "OBJECT",
+      properties: {
+        title: { type: "STRING" }, description: { type: "STRING" }, suggestion: { type: "STRING" },
+        rule_id: { type: "STRING" },
+        severity: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+        category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "dependency", "test_coverage", "other"] },
+        priority_score: { type: "INTEGER" }, file_path: { type: "STRING" },
+        line_start: { type: "INTEGER" }, line_end: { type: "INTEGER" }, code_snippet: { type: "STRING" },
+        status: { type: "STRING", enum: ["open", "pending_review"] },
+        is_false_positive: { type: "BOOLEAN" }, effort_minutes: { type: "INTEGER" },
+        confidence_score: { type: "NUMBER" }, human_review_required: { type: "BOOLEAN" },
+        rag_references: { type: "ARRAY", items: { type: "OBJECT", properties: { source: { type: "STRING" }, id: { type: "STRING" }, title: { type: "STRING" } }, required: ["source", "id", "title"] } },
+        score_breakdown: { type: "OBJECT", properties: { severity_base: { type: "INTEGER" }, impact_factor: { type: "INTEGER" }, complexity_inv: { type: "INTEGER" }, attack_surface: { type: "INTEGER" } }, required: ["severity_base", "impact_factor", "complexity_inv", "attack_surface"] }
+      },
+      required: ["title", "description", "suggestion", "rule_id", "severity", "category", "priority_score", "file_path", "line_start", "line_end", "code_snippet", "status", "is_false_positive", "effort_minutes", "confidence_score", "human_review_required", "rag_references", "score_breakdown"]
+    }
+  };
+
+  const reporterText = await callGeminiNode(reporterPrompt, JSON.stringify({
+    project_id: projectId, analysis_run_id: runId,
+    raw_issues: issuesWithRag, verified_issues: verifiedIssues, scored_issues: []
+  }), reporterSchema);
+
+  const reporterIssues = parseJsonSafe(reporterText, /\[\s*\{[\s\S]*\}\s*\]/);
+  if (!Array.isArray(reporterIssues)) {
+    console.log(`\x1b[33m  - [Reporter] ${relPath}: 최종 포맷 실패, 원시 이슈로 폴백\x1b[0m`);
+    return issuesWithRag.map(i => ({
+      title: i.title, description: i.description, suggestion: `AS-IS:\n${i.as_is}\n\nTO-BE:\n${i.to_be}`,
+      rule_id: null, severity: i.severity_suggestion || 'medium', category: i.category || 'other',
+      priority_score: i.severity_suggestion === 'critical' ? 90 : i.severity_suggestion === 'high' ? 75 : i.severity_suggestion === 'low' ? 30 : 50,
+      file_path: i.file_path || relPath, line_start: i.line_start, line_end: i.line_end,
+      code_snippet: i.code_snippet, status: 'open', is_false_positive: false,
+      effort_minutes: 30, confidence_score: i.confidence_raw || 0.7, human_review_required: false,
+      rag_references: [], score_breakdown: { severity_base: 50, impact_factor: 1, complexity_inv: 1, attack_surface: 1 }
+    }));
+  }
+
+  const passedIds = new Set(
+    verifiedIssues.filter(v => !v.is_false_positive && !v.duplicate_of).map(v => v.analyst_issue_id)
+  );
+  return reporterIssues.filter(i => !i.is_false_positive && (passedIds.size === 0 || passedIds.has(i.analyst_issue_id ?? '')));
+};
+
+// ----------------------------------------------------
+// 7-C. 전체 소스 파일 Gemini 파이프라인 실행
+// ----------------------------------------------------
+const runGeminiPipeline = async (sourceFiles, resolvedPath) => {
+  if (!GEMINI_API_KEY) {
+    console.log('\x1b[33m[AI] VITE_GEMINI_API_KEY 없음 — AI 분석 건너뜀\x1b[0m');
+    return [];
+  }
+
+  console.log(`\n\x1b[36m[AI Pipeline] Gemini 멀티 에이전트 분석 시작 (${sourceFiles.length}개 파일)\x1b[0m`);
+  const runId = crypto.randomUUID();
+  const allIssues = [];
+
+  for (let i = 0; i < sourceFiles.length; i++) {
+    const fileInfo = sourceFiles[i];
+    try {
+      console.log(`\n\x1b[36m▶ 분석 중 [${i+1}/${sourceFiles.length}]: ${fileInfo.relPath}\x1b[0m`);
+      const issues = await analyzeFileWithGemini(fileInfo, runId, '');
+      if (issues.length > 0) {
+        console.log(`\x1b[32m  ✓ ${issues.length}개 이슈 검출\x1b[0m`);
+        allIssues.push(...issues);
+      }
+      if (i < sourceFiles.length - 1) await sleep(5000);
+    } catch (err) {
+      console.error(`\x1b[31m  [Error] ${fileInfo.relPath} 분석 실패: ${err.message}\x1b[0m`);
+      if (i < sourceFiles.length - 1) await sleep(5000);
+    }
+  }
+
+  console.log(`\n\x1b[32m[AI Pipeline] 완료: 총 ${allIssues.length}개 이슈 검출\x1b[0m`);
+  return allIssues;
+};
+
 // ----------------------------------------------------
 // 8. 지능적 중복 제거 (Deduplication) 알고리즘
 // ----------------------------------------------------
@@ -601,15 +918,13 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
 
   let ownerId;
   try {
-    const payloadBase64 = supabaseToken.split('.')[1];
-    if (!payloadBase64) {
-      throw new Error('JWT 토큰 페이로드가 누락되었습니다.');
-    }
-    const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-    if (!decoded || !decoded.sub) {
-      throw new Error('토큰에 사용자 ID가 없습니다.');
-    }
-    ownerId = decoded.sub;
+    const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${supabaseToken}` }
+    });
+    if (!userRes.ok) throw new Error(`Auth API ${userRes.status}`);
+    const userData = await userRes.json();
+    if (!userData?.id) throw new Error('사용자 정보 없음');
+    ownerId = userData.id;
   } catch (e) {
     console.error('\x1b[31m[Error] 사용자 세션 정보를 추출할 수 없습니다. 다시 로그인해 주세요.\x1b[0m');
     process.exit(1);
@@ -718,8 +1033,7 @@ const handleAnalyze = async (targetPath, projectId, customGcpProjectId) => {
     }
   }
 
-  console.log(`\x1b[33m- [CODE EYE] 하이브리드 모드: 내부 AI 스캔을 생략합니다. (외부 분석 결과를 'import' 명령어로 업로드하세요.)\x1b[0m\n`);
-  const aiIssues = [];
+  const aiIssues = await runGeminiPipeline(sourceFiles, resolvedPath);
 
   console.log('\n\x1b[34m[Deduplicate] Linter 결과와 AI 진단 결과의 지능형 중복 제거 수행 중...\x1b[0m');
   const finalIssues = deduplicateIssues(aiIssues, linterIssues);
@@ -838,15 +1152,13 @@ const handleImport = async (jsonFilePath, projectId) => {
 
   let ownerId;
   try {
-    const payloadBase64 = supabaseToken.split('.')[1];
-    if (!payloadBase64) {
-      throw new Error('JWT 토큰 페이로드가 누락되었습니다.');
-    }
-    const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-    if (!decoded || !decoded.sub) {
-      throw new Error('토큰에 사용자 ID가 없습니다.');
-    }
-    ownerId = decoded.sub;
+    const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${supabaseToken}` }
+    });
+    if (!userRes.ok) throw new Error(`Auth API ${userRes.status}`);
+    const userData = await userRes.json();
+    if (!userData?.id) throw new Error('사용자 정보 없음');
+    ownerId = userData.id;
   } catch (e) {
     console.error('\x1b[31m[Error] 사용자 세션 정보를 추출할 수 없습니다. "node bin/code-eye.js login"을 먼저 실행하세요.\x1b[0m');
     process.exit(1);

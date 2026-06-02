@@ -1,16 +1,122 @@
-import { type Issue } from './supabase';
-import agentPrompt from './agents/code-reviewer-agent.md?raw';
+import { getSupabaseClient, type Issue } from './supabase';
+import generalPrompt from './agents/code-reviewer-agent.md?raw';
+import parserPrompt from './agents/parser_agent.md?raw';
+import specialistCppPrompt from './agents/specialist_cpp.md?raw';
+import specialistPythonGoPrompt from './agents/specialist_python_go.md?raw';
+import specialistJsTsPrompt from './agents/specialist_jsts.md?raw';
+import specialistJvmClrPrompt from './agents/specialist_jvm_clr.md?raw';
+import verifierPrompt from './agents/verifier_agent.md?raw';
+import scorerPrompt from './agents/scorer_agent.md?raw';
+import reporterPrompt from './agents/reporter_agent.md?raw';
 
-interface GeminiIssueResponse {
+interface Chunk {
+  chunk_id: string;
+  line_start: number;
+  line_end: number;
+  context_summary: string;
+  content: string;
+}
+
+interface ParserResult {
+  file_name: string;
+  language: string;
+  complexity_hint: 'low' | 'medium' | 'high';
+  dependencies: string[];
+  chunks: Chunk[];
+}
+
+interface SpecialistIssue {
+  analyst_issue_id: string;
+  title: string;
+  description: string;
+  severity_suggestion: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category: 'security' | 'bug' | 'performance' | 'code_smell' | 'maintainability' | 'style' | 'documentation' | 'dependency' | 'test_coverage' | 'other';
+  file_path: string;
+  line_start: number;
+  line_end: number;
+  code_snippet: string;
+  as_is: string;
+  to_be: string;
+  confidence_raw: number;
+  rag_references?: { source: string; id: string; title: string }[];
+}
+
+interface VerifierIssue {
+  analyst_issue_id: string;
+  is_false_positive: boolean;
+  severity_original: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  severity_verified: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  severity_changed: boolean;
+  severity_change_reason: string | null;
+  duplicate_of: string | null;
+  affected_lines: number[];
+  confidence_verified: number;
+  human_review_required: boolean;
+  rag_references: { source: string; id: string; title: string }[];
+  verifier_note: string;
+}
+
+interface VerifierResult {
+  verified_issues: VerifierIssue[];
+  summary: {
+    total_raw: number;
+    false_positives_removed: number;
+    severity_downgraded: number;
+    duplicates_merged: number;
+    human_review_required: number;
+    passed: number;
+  };
+}
+
+interface ScorerIssue {
+  analyst_issue_id: string;
+  priority_score: number;
+  score_breakdown: {
+    severity_base: number;
+    impact_factor: number;
+    complexity_inv: number;
+    attack_surface: number;
+  };
+  effort_minutes: number;
+}
+
+interface ScorerResult {
+  scored_issues: ScorerIssue[];
+}
+
+interface ReporterIssue {
   title: string;
   description: string;
   suggestion: string;
   rule_id: string;
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
   category: 'security' | 'bug' | 'performance' | 'code_smell' | 'maintainability' | 'style' | 'documentation' | 'dependency' | 'test_coverage' | 'other';
+  priority_score: number;
+  file_path: string;
   line_start: number;
   line_end: number;
   code_snippet: string;
+  status: 'open' | 'pending_review';
+  is_false_positive: boolean;
+  effort_minutes: number;
+  confidence_score: number;
+  human_review_required: boolean;
+  rag_references: { source: string; id: string; title: string }[];
+  score_breakdown: {
+    severity_base: number;
+    impact_factor: number;
+    complexity_inv: number;
+    attack_surface: number;
+  };
+}
+
+interface RagKnowledgeRow {
+  ref_id: string;
+  title: string;
+  description: string;
+  source: string;
+  severity: string;
+  similarity: number;
 }
 
 // severity별 가중치 및 결정론적 priority score 계산기 (W1, W2, W3 연구 논문 가중치 모델 차용)
@@ -59,7 +165,12 @@ const analyzeLocally = (
   try {
     const saved = localStorage.getItem('code_eye_rules_config');
     if (saved) {
-      rulesConfig = JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        rulesConfig = parsed.filter(
+          (r) => typeof r === 'object' && r !== null && typeof r.id === 'string' && typeof r.enabled === 'boolean'
+        );
+      }
     }
   } catch {
     // Fallback
@@ -307,6 +418,131 @@ const analyzeLocally = (
   return issues;
 };
 
+const callGemini = async (
+  systemPrompt: string,
+  userPrompt: string,
+  _apiKey: string,
+  providerToken?: string,
+  responseSchema?: object,
+  responseMimeType?: string
+): Promise<string> => {
+  // OAuth provider token: call Gemini directly (token not stored in bundle)
+  if (providerToken) {
+    const modelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${providerToken}`,
+    };
+    const gcpProjectId = import.meta.env.VITE_GCP_PROJECT_ID || '';
+    if (gcpProjectId) headers['x-goog-user-project'] = gcpProjectId;
+
+    const requestBody: { contents: { parts: { text: string }[] }[]; generationConfig?: { responseMimeType?: string; responseSchema?: object } } = {
+      contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }]
+    };
+    if (responseMimeType || responseSchema) {
+      requestBody.generationConfig = {};
+      if (responseMimeType) requestBody.generationConfig.responseMimeType = responseMimeType;
+      if (responseSchema) requestBody.generationConfig.responseSchema = responseSchema;
+    }
+
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(requestBody) });
+    if (!response.ok) {
+      const errText = await response.text();
+      let detail = `HTTP ${response.status} (${response.statusText})`;
+      if (response.status === 429) detail = 'Gemini API 호출 한도(Rate Limit) 초과. 잠시 후 다시 시도해 주세요.';
+      else if (response.status === 401 || response.status === 403) detail = '인증 오류. Google OAuth 토큰을 확인해 주세요.';
+      throw new Error(`Gemini API Error: ${detail} - ${errText}`);
+    }
+    const json = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error('Gemini 빈 응답');
+    return rawText;
+  }
+
+  // No OAuth token: route through Supabase Edge Function (GEMINI_API_KEY is a server secret)
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Gemini proxy unavailable — Supabase client not configured');
+
+  const { data, error } = await supabase.functions.invoke<{ text?: string; error?: string }>('gemini-proxy', {
+    body: { systemPrompt, userPrompt, responseSchema }
+  });
+
+  if (error) throw new Error(`Gemini proxy error: ${error.message}`);
+  if (!data?.text && data?.error) throw new Error(`Gemini proxy: ${data.error}`);
+  if (!data?.text) throw new Error('Gemini 빈 응답 (proxy)');
+  return data.text;
+};
+
+export const getGeminiEmbeddingForClaude = async (text: string): Promise<number[]> => {
+  const result = await getGeminiEmbedding(text, '', undefined);
+  return result || [];
+};
+
+const getGeminiEmbedding = async (
+  text: string,
+  _apiKey: string,
+  providerToken?: string
+): Promise<number[] | null> => {
+  try {
+    // OAuth provider token: call embedding API directly
+    if (providerToken) {
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${providerToken}`,
+      };
+      const gcpProjectId = import.meta.env.VITE_GCP_PROJECT_ID || '';
+      if (gcpProjectId) headers['x-goog-user-project'] = gcpProjectId;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: 'models/text-embedding-004', content: { parts: [{ text }] } })
+      });
+      if (!res.ok) { console.warn("Embedding generation failed:", res.statusText); return null; }
+      const json = await res.json() as { embedding?: { values?: number[] } };
+      return json.embedding?.values || null;
+    }
+
+    // No OAuth token: route through Supabase Edge Function
+    const supabase = getSupabaseClient();
+    if (!supabase) return null;
+
+    const { data, error } = await supabase.functions.invoke<{ embedding?: number[] | null; error?: string }>('gemini-proxy', {
+      body: { type: 'embed', text }
+    });
+    if (error || !data?.embedding) return null;
+    return data.embedding;
+  } catch (err) {
+    console.error("Embedding error:", err);
+    return null;
+  }
+};
+
+const queryRagKnowledge = async (
+  embedding: number[],
+  language: string
+): Promise<RagKnowledgeRow[]> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase.rpc('match_rag_knowledge', {
+      query_embedding: embedding,
+      match_count: 5,
+      target_language: language
+    });
+    if (error) {
+      console.warn("RAG query failed via RPC:", error);
+      return [];
+    }
+    return (data || []) as RagKnowledgeRow[];
+  } catch (err) {
+    console.error("RAG query error:", err);
+    return [];
+  }
+};
+
 export const analyzeCodeWithGemini = async (
   fileName: string,
   codeContent: string,
@@ -314,7 +550,7 @@ export const analyzeCodeWithGemini = async (
   runId: string,
   providerToken?: string
 ): Promise<Issue[]> => {
-  // 1. 입력 데이터 검증 (API 한도 방지 및 토큰 낭비 차단)
+  // 1. 입력 데이터 검증
   if (!codeContent || codeContent.trim().length === 0) {
     return [];
   }
@@ -323,136 +559,443 @@ export const analyzeCodeWithGemini = async (
     return [];
   }
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-  const modelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-1.5-flash';
-
-  // If Gemini credentials are not available, use the robust offline static analysis engine.
-  // This satisfies "Gemini key is not used" and guarantees zero-cost offline code analysis.
-  if (!apiKey && !providerToken) {
+  // 오프라인 모드: OAuth 토큰도 없고 Supabase도 미구성이면 로컬 분석기 실행
+  if (!providerToken && !getSupabaseClient()) {
     console.log(`[Offline Analyzer] Running local rule-based scan for: ${fileName}`);
     return analyzeLocally(fileName, codeContent, projectId, runId);
   }
 
-  let url: string;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (apiKey) {
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-  } else {
-    // Google OAuth Access Token을 베어러 토큰으로 헤더에 탑재
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
-    headers['Authorization'] = `Bearer ${providerToken}`;
-    const gcpProjectId = import.meta.env.VITE_GCP_PROJECT_ID || '';
-    if (gcpProjectId) {
-      headers['x-goog-user-project'] = gcpProjectId;
-    }
-  }
-
-  const systemPrompt = agentPrompt;
-
-  const userPrompt = `File Name: ${fileName}
-Content:
-\`\`\`
-${codeContent}
-\`\`\``;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      contents: [{
-        parts: [{
-          text: `${systemPrompt}\n\n${userPrompt}`
-        }]
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
+  try {
+    // ==========================================
+    // [1] Parser Agent
+    // ==========================================
+    console.log(`[Parser Agent] Parsing and chunking: ${fileName}`);
+    const parserSchema = {
+      type: "OBJECT",
+      properties: {
+        file_name: { type: "STRING" },
+        language: { type: "STRING" },
+        complexity_hint: { type: "STRING", enum: ["low", "medium", "high"] },
+        dependencies: { type: "ARRAY", items: { type: "STRING" } },
+        chunks: {
           type: "ARRAY",
-          description: "List of code review issues detected in the source code.",
           items: {
             type: "OBJECT",
             properties: {
-              title: { type: "STRING" },
-              description: { type: "STRING" },
-              suggestion: { type: "STRING" },
-              rule_id: { type: "STRING" },
-              severity: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
-              category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "other"] },
+              chunk_id: { type: "STRING" },
               line_start: { type: "INTEGER" },
               line_end: { type: "INTEGER" },
-              code_snippet: { type: "STRING" }
+              context_summary: { type: "STRING" },
+              content: { type: "STRING" }
             },
-            required: ["title", "description", "suggestion", "rule_id", "severity", "category", "line_start", "line_end", "code_snippet"]
+            required: ["chunk_id", "line_start", "line_end", "context_summary", "content"]
           }
         }
+      },
+      required: ["file_name", "language", "complexity_hint", "dependencies", "chunks"]
+    };
+
+    const parserUserPrompt = `File Name: ${fileName}\nContent:\n\`\`\`\n${codeContent}\n\`\`\``;
+    const parserResponseText = await callGemini(
+      parserPrompt,
+      parserUserPrompt,
+      '',
+      providerToken,
+      parserSchema,
+      "application/json"
+    );
+
+    let parsedResult: ParserResult;
+    try {
+      parsedResult = JSON.parse(parserResponseText) as ParserResult;
+    } catch (e) {
+      console.error("Parser response failed to parse as JSON, trying fallback extraction...");
+      const jsonMatch = parserResponseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedResult = JSON.parse(jsonMatch[0]) as ParserResult;
+      } else {
+        throw new Error("Parser Agent returned invalid JSON format", { cause: e });
       }
-    })
-  });
-
-  // 2. 구체적인 HTTP 에러 구별 핸들링
-  if (!response.ok) {
-    const errText = await response.text();
-    let detail: string;
-    if (response.status === 429) {
-      detail = 'Gemini API 호출 한도(Rate Limit) 초과. 잠시 후 다시 시도해 주세요.';
-    } else if (response.status === 401 || response.status === 403) {
-      detail = '인증 오류. API 키 혹은 Google OAuth 토큰을 확인해 주세요.';
-    } else {
-      detail = `HTTP ${response.status} (${response.statusText})`;
     }
-    throw new Error(`Gemini API Error: ${detail} - ${errText}`);
-  }
 
-  const resJson = await response.json();
-  const rawText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-  
-  if (!rawText) {
-    return [];
-  }
+    const chunks = parsedResult.chunks || [];
+    const detectedLanguage = (parsedResult.language || '').toLowerCase().trim();
 
-  // 3. JSON.parse 방어적 파싱 복구 로직 구현
-  let parsedIssues: GeminiIssueResponse[];
-  try {
-    parsedIssues = JSON.parse(rawText);
-  } catch (e: unknown) {
-    const error = e as Error;
-    console.error("Gemini response is not valid JSON, trying fallback extraction...", error.message);
-    const jsonMatch = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (jsonMatch) {
+    // ==========================================
+    // [2] Language Router & [3] Specialist Analyst
+    // ==========================================
+    let routingLanguage = detectedLanguage;
+    let specialistPrompt = generalPrompt;
+
+    if (routingLanguage === 'cpp' || routingLanguage === 'c' || fileName.endsWith('.cpp') || fileName.endsWith('.c') || fileName.endsWith('.h')) {
+      routingLanguage = 'c/cpp';
+      specialistPrompt = specialistCppPrompt;
+    } else if (routingLanguage === 'typescript' || routingLanguage === 'javascript' || routingLanguage === 'tsx' || routingLanguage === 'jsx' || fileName.endsWith('.ts') || fileName.endsWith('.tsx') || fileName.endsWith('.js') || fileName.endsWith('.jsx')) {
+      routingLanguage = 'js/ts';
+      specialistPrompt = specialistJsTsPrompt;
+    } else if (routingLanguage === 'python' || routingLanguage === 'go' || fileName.endsWith('.py') || fileName.endsWith('.go')) {
+      routingLanguage = 'python/go';
+      specialistPrompt = specialistPythonGoPrompt;
+    } else if (routingLanguage === 'java' || routingLanguage === 'csharp' || routingLanguage === 'cs' || fileName.endsWith('.java') || fileName.endsWith('.cs')) {
+      routingLanguage = 'jvm/clr';
+      specialistPrompt = specialistJvmClrPrompt;
+    }
+
+    console.log(`[Language Router] Routed ${fileName} (${detectedLanguage}) -> ${routingLanguage} Specialist`);
+
+    const specialistSchema = {
+      type: "OBJECT",
+      properties: {
+        chunk_id: { type: "STRING" },
+        raw_issues: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              analyst_issue_id: { type: "STRING" },
+              title: { type: "STRING" },
+              description: { type: "STRING" },
+              severity_suggestion: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+              category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "dependency", "test_coverage", "other"] },
+              file_path: { type: "STRING" },
+              line_start: { type: "INTEGER" },
+              line_end: { type: "INTEGER" },
+              code_snippet: { type: "STRING" },
+              as_is: { type: "STRING" },
+              to_be: { type: "STRING" },
+              confidence_raw: { type: "NUMBER" }
+            },
+            required: ["analyst_issue_id", "title", "description", "severity_suggestion", "category", "file_path", "line_start", "line_end", "code_snippet", "as_is", "to_be", "confidence_raw"]
+          }
+        }
+      },
+      required: ["chunk_id", "raw_issues"]
+    };
+
+    // Specialist 병렬 처리
+    const specialistPromises = chunks.map(async (chunk) => {
       try {
-        parsedIssues = JSON.parse(jsonMatch[0]);
-      } catch (innerErr: unknown) {
-        const innerError = innerErr as Error;
-        throw new Error(`Failed to parse Gemini JSON output (fallback failed): ${innerError.message}`, { cause: innerErr });
-      }
-    } else {
-      throw new Error(`Failed to parse Gemini JSON output: ${error.message}`, { cause: e });
-    }
-  }
+        const specialistUserPrompt = JSON.stringify({
+          chunk_id: chunk.chunk_id,
+          language: parsedResult.language,
+          file_name: fileName,
+          line_start: chunk.line_start,
+          line_end: chunk.line_end,
+          context_summary: chunk.context_summary,
+          dependencies: parsedResult.dependencies,
+          content: chunk.content
+        });
 
-  // Gemini 응답 구조를 Supabase용 Issue 타입으로 매핑
-  return parsedIssues.map((issue, idx) => ({
-    id: `iss-gemini-${Date.now()}-${idx}`,
-    project_id: projectId,
-    analysis_run_id: runId,
-    title: issue.title,
-    description: issue.description,
-    suggestion: issue.suggestion,
-    rule_id: issue.rule_id,
-    severity: issue.severity,
-    category: issue.category === 'other' ? 'other' : issue.category,
-    priority_score: calculatePriorityScore(issue.severity, issue.title, issue.category),
-    file_path: fileName,
-    line_start: issue.line_start,
-    line_end: issue.line_end,
-    code_snippet: issue.code_snippet,
-    status: 'open',
-    assignee_id: null,
-    resolved_by: null,
-    resolved_at: null,
-    created_at: new Date().toISOString()
-  }));
+        const resText = await callGemini(
+          specialistPrompt,
+          specialistUserPrompt,
+          '',
+          providerToken,
+          specialistSchema,
+          "application/json"
+        );
+        return JSON.parse(resText) as { chunk_id: string; raw_issues: SpecialistIssue[] };
+      } catch (err) {
+        console.error(`[Specialist Error] Failed to scan chunk ${chunk.chunk_id}:`, err);
+        return { chunk_id: chunk.chunk_id, raw_issues: [] };
+      }
+    });
+
+    const specialistResults = await Promise.all(specialistPromises);
+    const mergedRawIssues = specialistResults.flatMap((r) => r.raw_issues || []);
+
+    if (mergedRawIssues.length === 0) {
+      console.log(`[Specialist Analyst] No issues detected in any chunk of: ${fileName}`);
+      return [];
+    }
+
+    console.log(`[Specialist Analyst] Detected ${mergedRawIssues.length} raw issues in: ${fileName}`);
+
+    // ==========================================
+    // [4] RAG retriever
+    // ==========================================
+    console.log(`[RAG Retriever] Embedding issues and matching with database RAG knowledge...`);
+    const issuesWithRag = await Promise.all(mergedRawIssues.map(async (issue) => {
+      try {
+        const queryText = `${issue.title}: ${issue.description}`;
+        const embedding = await getGeminiEmbedding(queryText, '', providerToken);
+        let ragReferences: RagKnowledgeRow[] = [];
+        if (embedding) {
+          ragReferences = await queryRagKnowledge(embedding, parsedResult.language);
+        }
+        return {
+          ...issue,
+          rag_references: ragReferences.map((r) => ({
+            source: r.source,
+            id: r.ref_id,
+            title: r.title
+          }))
+        };
+      } catch (err) {
+        console.warn(`[RAG Error] Failed to fetch references for issue ${issue.analyst_issue_id}:`, err);
+        return {
+          ...issue,
+          rag_references: []
+        };
+      }
+    }));
+
+    // ==========================================
+    // [5] Verifier Agent
+    // ==========================================
+    console.log(`[Verifier Agent] Cross-validating issues & filtering False Positives...`);
+    const verifierSchema = {
+      type: "OBJECT",
+      properties: {
+        verified_issues: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              analyst_issue_id: { type: "STRING" },
+              is_false_positive: { type: "BOOLEAN" },
+              severity_original: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+              severity_verified: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+              severity_changed: { type: "BOOLEAN" },
+              severity_change_reason: { type: "STRING", nullable: true },
+              duplicate_of: { type: "STRING", nullable: true },
+              affected_lines: { type: "ARRAY", items: { type: "INTEGER" } },
+              confidence_verified: { type: "NUMBER" },
+              human_review_required: { type: "BOOLEAN" },
+              rag_references: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    source: { type: "STRING" },
+                    id: { type: "STRING" },
+                    title: { type: "STRING" }
+                  },
+                  required: ["source", "id", "title"]
+                }
+              },
+              verifier_note: { type: "STRING" }
+            },
+            required: ["analyst_issue_id", "is_false_positive", "severity_original", "severity_verified", "severity_changed", "severity_change_reason", "duplicate_of", "affected_lines", "confidence_verified", "human_review_required", "rag_references", "verifier_note"]
+          }
+        },
+        summary: {
+          type: "OBJECT",
+          properties: {
+            total_raw: { type: "INTEGER" },
+            false_positives_removed: { type: "INTEGER" },
+            severity_downgraded: { type: "INTEGER" },
+            duplicates_merged: { type: "INTEGER" },
+            human_review_required: { type: "INTEGER" },
+            passed: { type: "INTEGER" }
+          },
+          required: ["total_raw", "false_positives_removed", "severity_downgraded", "duplicates_merged", "human_review_required", "passed"]
+        }
+      },
+      required: ["verified_issues", "summary"]
+    };
+
+    const verifierUserPrompt = JSON.stringify({
+      file_name: fileName,
+      language: parsedResult.language,
+      raw_issues: issuesWithRag
+    });
+
+    const verifierResponseText = await callGemini(
+      verifierPrompt,
+      verifierUserPrompt,
+      '',
+      providerToken,
+      verifierSchema,
+      "application/json"
+    );
+
+    let verifierResult: VerifierResult;
+    try {
+      verifierResult = JSON.parse(verifierResponseText) as VerifierResult;
+    } catch (e) {
+      console.error("Verifier response failed to parse as JSON, trying fallback extraction...");
+      const jsonMatch = verifierResponseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        verifierResult = JSON.parse(jsonMatch[0]) as VerifierResult;
+      } else {
+        throw new Error("Verifier Agent returned invalid JSON format", { cause: e });
+      }
+    }
+
+    const verifiedIssues = verifierResult.verified_issues || [];
+
+    // ==========================================
+    // [6] Scorer Agent
+    // ==========================================
+    console.log(`[Scorer Agent] Calculating priority scores...`);
+    const scorerSchema = {
+      type: "OBJECT",
+      properties: {
+        scored_issues: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              analyst_issue_id: { type: "STRING" },
+              priority_score: { type: "INTEGER" },
+              score_breakdown: {
+                type: "OBJECT",
+                properties: {
+                  severity_base: { type: "INTEGER" },
+                  impact_factor: { type: "INTEGER" },
+                  complexity_inv: { type: "INTEGER" },
+                  attack_surface: { type: "INTEGER" }
+                },
+                required: ["severity_base", "impact_factor", "complexity_inv", "attack_surface"]
+              },
+              effort_minutes: { type: "INTEGER" }
+            },
+            required: ["analyst_issue_id", "priority_score", "score_breakdown", "effort_minutes"]
+          }
+        }
+      },
+      required: ["scored_issues"]
+    };
+
+    const scorerUserPrompt = JSON.stringify({
+      verified_issues: verifiedIssues
+    });
+
+    const scorerResponseText = await callGemini(
+      scorerPrompt,
+      scorerUserPrompt,
+      '',
+      providerToken,
+      scorerSchema,
+      "application/json"
+    );
+
+    let scorerResult: ScorerResult;
+    try {
+      scorerResult = JSON.parse(scorerResponseText) as ScorerResult;
+    } catch (e) {
+      console.error("Scorer response failed to parse as JSON, trying fallback extraction...");
+      const jsonMatch = scorerResponseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        scorerResult = JSON.parse(jsonMatch[0]) as ScorerResult;
+      } else {
+        throw new Error("Scorer Agent returned invalid JSON format", { cause: e });
+      }
+    }
+
+    // ==========================================
+    // [7] Reporter Agent
+    // ==========================================
+    console.log(`[Reporter Agent] Compiling final report...`);
+    const reporterSchema = {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING" },
+          description: { type: "STRING" },
+          suggestion: { type: "STRING" },
+          rule_id: { type: "STRING" },
+          severity: { type: "STRING", enum: ["critical", "high", "medium", "low", "info"] },
+          category: { type: "STRING", enum: ["security", "bug", "performance", "code_smell", "maintainability", "style", "documentation", "dependency", "test_coverage", "other"] },
+          priority_score: { type: "INTEGER" },
+          file_path: { type: "STRING" },
+          line_start: { type: "INTEGER" },
+          line_end: { type: "INTEGER" },
+          code_snippet: { type: "STRING" },
+          status: { type: "STRING", enum: ["open", "pending_review"] },
+          is_false_positive: { type: "BOOLEAN" },
+          effort_minutes: { type: "INTEGER" },
+          confidence_score: { type: "NUMBER" },
+          human_review_required: { type: "BOOLEAN" },
+          rag_references: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                source: { type: "STRING" },
+                id: { type: "STRING" },
+                title: { type: "STRING" }
+              },
+              required: ["source", "id", "title"]
+            }
+          },
+          score_breakdown: {
+            type: "OBJECT",
+            properties: {
+              severity_base: { type: "INTEGER" },
+              impact_factor: { type: "INTEGER" },
+              complexity_inv: { type: "INTEGER" },
+              attack_surface: { type: "INTEGER" }
+            },
+            required: ["severity_base", "impact_factor", "complexity_inv", "attack_surface"]
+          }
+        },
+        required: ["title", "description", "suggestion", "rule_id", "severity", "category", "priority_score", "file_path", "line_start", "line_end", "code_snippet", "status", "is_false_positive", "effort_minutes", "confidence_score", "human_review_required", "rag_references", "score_breakdown"]
+      }
+    };
+
+    const reporterUserPrompt = JSON.stringify({
+      project_id: projectId,
+      analysis_run_id: runId,
+      raw_issues: issuesWithRag,
+      verified_issues: verifiedIssues,
+      scored_issues: scorerResult.scored_issues
+    });
+
+    const reporterResponseText = await callGemini(
+      reporterPrompt,
+      reporterUserPrompt,
+      '',
+      providerToken,
+      reporterSchema,
+      "application/json"
+    );
+
+    let finalIssues: ReporterIssue[];
+    try {
+      finalIssues = JSON.parse(reporterResponseText) as ReporterIssue[];
+    } catch (e) {
+      console.error("Reporter response failed to parse as JSON, trying fallback extraction...");
+      const jsonMatch = reporterResponseText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (jsonMatch) {
+        finalIssues = JSON.parse(jsonMatch[0]) as ReporterIssue[];
+      } else {
+        throw new Error("Reporter Agent returned invalid JSON format", { cause: e });
+      }
+    }
+
+    // Map to final Issue objects
+    return finalIssues.map((issue) => ({
+      id: crypto.randomUUID(),
+      project_id: projectId,
+      analysis_run_id: runId,
+      title: issue.title,
+      description: issue.description,
+      suggestion: issue.suggestion,
+      rule_id: issue.rule_id,
+      severity: issue.severity,
+      category: issue.category,
+      priority_score: issue.priority_score,
+      file_path: issue.file_path,
+      line_start: issue.line_start,
+      line_end: issue.line_end,
+      code_snippet: issue.code_snippet,
+      status: issue.status === 'pending_review' ? 'open' : issue.status,
+      assignee_id: null,
+      resolved_by: null,
+      resolved_at: null,
+      created_at: new Date().toISOString(),
+      confidence_score: issue.confidence_score,
+      human_review_required: issue.human_review_required,
+      rag_references: issue.rag_references,
+      score_breakdown: issue.score_breakdown,
+      effort_minutes: issue.effort_minutes
+    }));
+
+  } catch (err: unknown) {
+    console.error("Multi-Agent pipeline failed, falling back to local analysis:", err);
+    return analyzeLocally(fileName, codeContent, projectId, runId);
+  }
 };
