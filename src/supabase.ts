@@ -76,6 +76,7 @@ export interface Project {
   language: string;
   repo_url: string;
   status: 'active' | 'archived' | 'deleted';
+  webhook_secret: string | null;
   total_issues: number;
   open_issues: number;
   created_at: string;
