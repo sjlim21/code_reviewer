@@ -57,8 +57,11 @@ export default function History() {
   const chartData: ChartPoint[] = runs.map((run, i) => {
     const prev = runs[i - 1]
     const prevTotal = prev?.issues_found ?? run.issues_found
+    const d = new Date(run.created_at)
+    const dateStr = d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+    const timeStr = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
     return {
-      date: new Date(run.created_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }),
+      date: `${dateStr} ${timeStr}`,
       total: run.issues_found,
       critical: run.critical_count,
       high: run.high_count,
@@ -68,6 +71,16 @@ export default function History() {
       runId: run.id,
     }
   })
+
+  // 날짜별 그룹화 (최신순)
+  const groupedRuns = [...runs].reverse().reduce((acc, run) => {
+    const dateKey = new Date(run.created_at).toLocaleDateString('ko-KR', {
+      year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
+    })
+    if (!acc[dateKey]) acc[dateKey] = []
+    acc[dateKey].push(run)
+    return acc
+  }, {} as Record<string, AnalysisRun[]>)
 
   const tooltipStyle = {
     contentStyle: {
@@ -105,7 +118,7 @@ export default function History() {
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, angle: -30, textAnchor: 'end' }} height={48} interval="preserveStartEnd" />
                 <YAxis tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
                 <Tooltip {...tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }} />
@@ -122,7 +135,7 @@ export default function History() {
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, angle: -30, textAnchor: 'end' }} height={48} interval="preserveStartEnd" />
                 <YAxis tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
                 <Tooltip {...tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }} />
@@ -132,36 +145,45 @@ export default function History() {
             </ResponsiveContainer>
           </div>
 
-          {/* Run timeline list */}
+          {/* Run timeline list — grouped by date */}
           <div className="rounded-xl border border-white/5 overflow-hidden">
             <div className="px-4 py-2 bg-white/2 border-b border-white/5">
               <p className="text-xs text-white/40 uppercase tracking-wider">분석 실행 목록</p>
             </div>
-            {[...runs].reverse().map((run) => (
-              <div
-                key={run.id}
-                onClick={() => setSelectedRunId(run.id === selectedRunId ? null : run.id)}
-                className="flex items-center justify-between px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/3 cursor-pointer transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${triggerBadgeClass(run.trigger_type)}`}>
-                    {run.trigger_type}
-                  </span>
-                  <span className="text-sm text-white/60">
-                    {new Date(run.created_at).toLocaleString('ko-KR')}
-                  </span>
+            {Object.entries(groupedRuns).map(([dateLabel, dayRuns]) => (
+              <div key={dateLabel}>
+                {/* Date group header */}
+                <div className="px-4 py-2 bg-white/[0.03] border-b border-white/5 flex items-center gap-2">
+                  <span className="text-xs font-medium text-white/50">{dateLabel}</span>
+                  <span className="text-xs text-white/25">{dayRuns.length}회</span>
                 </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <span className="text-white/50">이슈 {run.issues_found}</span>
-                  <span className="text-red-400">Critical {run.critical_count}</span>
-                  <span className={`px-2 py-0.5 rounded-full ${
-                    run.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                    run.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                    'bg-white/10 text-white/40'
-                  }`}>
-                    {run.status}
-                  </span>
-                </div>
+                {dayRuns.map((run, idx) => (
+                  <div
+                    key={run.id}
+                    onClick={() => setSelectedRunId(run.id === selectedRunId ? null : run.id)}
+                    className={`flex items-center justify-between px-4 py-3 border-b border-white/5 hover:bg-white/3 cursor-pointer transition-colors ${idx === dayRuns.length - 1 ? 'border-white/8' : ''}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${triggerBadgeClass(run.trigger_type)}`}>
+                        {run.trigger_type}
+                      </span>
+                      <span className="text-sm text-white/60">
+                        {new Date(run.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs">
+                      <span className="text-white/50">이슈 {run.issues_found}</span>
+                      <span className="text-red-400">Critical {run.critical_count}</span>
+                      <span className={`px-2 py-0.5 rounded-full ${
+                        run.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                        run.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                        'bg-white/10 text-white/40'
+                      }`}>
+                        {run.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
