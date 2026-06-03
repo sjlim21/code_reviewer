@@ -8,6 +8,7 @@ import specialistJvmClrPrompt from './agents/specialist_jvm_clr.md?raw';
 import verifierPrompt from './agents/verifier_agent.md?raw';
 import scorerPrompt from './agents/scorer_agent.md?raw';
 import reporterPrompt from './agents/reporter_agent.md?raw';
+import CROSS_FILE_AGENT from './agents/cross_file_agent.md?raw';
 
 // ---------------------------------------------------------------------------
 // SHA-256 file hash utility
@@ -64,6 +65,93 @@ export function triageByConfidence(issues: Issue[]): Issue[] {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-file analysis types and helpers
+// ---------------------------------------------------------------------------
+interface FileSummary {
+  path: string
+  language: string
+  functions: string[]
+  imports: string[]
+  exports: string[]
+}
+
+function buildFileSummaries(files: Array<{ path?: string; file_name?: string; content?: string; code?: string; language?: string }>): FileSummary[] {
+  return files.map(file => {
+    const content = file.content ?? file.code ?? ''
+    const path = file.path ?? file.file_name ?? 'unknown'
+
+    // Extract function names (simple regex — good enough for summary)
+    const functionMatches = content.match(/(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[\w]+)\s*=>|(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{)/g) ?? []
+    const functions = functionMatches.slice(0, 20).map(m => m.split(/[\s(]/)[1] ?? m).filter(Boolean)
+
+    // Extract imports
+    const importMatches = content.match(/(?:import|require)\s*(?:\(['"](.*?)['"]\)|[^'"]*['"](.*?)['"])/g) ?? []
+    const imports = importMatches.slice(0, 15).map(m => {
+      const match = m.match(/['"](.*?)['"]/)
+      return match?.[1] ?? ''
+    }).filter(Boolean)
+
+    // Extract exports
+    const exportMatches = content.match(/export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)/g) ?? []
+    const exports = exportMatches.slice(0, 15).map(m => m.split(/\s+/).pop() ?? '').filter(Boolean)
+
+    return {
+      path,
+      language: file.language ?? 'unknown',
+      functions,
+      imports,
+      exports,
+    }
+  })
+}
+
+async function runCrossFileAnalysis(
+  allIssues: Issue[],
+  fileSummaries: FileSummary[],
+  providerToken?: string
+): Promise<Issue[]> {
+  if (fileSummaries.length < 2) return []  // no point on single file
+
+  const input = {
+    existing_issues: allIssues.map(i => ({
+      title: i.title,
+      file_path: i.file_path,
+      line: i.line_start,
+      category: i.category,
+    })),
+    file_summaries: fileSummaries,
+  }
+
+  try {
+    const resultText = await callGemini(
+      CROSS_FILE_AGENT,
+      `Input:\n${JSON.stringify(input)}`,
+      '',
+      providerToken
+    )
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(resultText)
+    } catch {
+      const jsonMatch = resultText.match(/\[\s*\{[\s\S]*\}\s*\]/)
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0])
+      } else {
+        return []
+      }
+    }
+
+    const crossIssues = (Array.isArray(parsed) ? parsed : []) as Issue[]
+    // Only keep high-confidence cross-file findings
+    return crossIssues.filter(i => ((i as unknown as { confidence_score?: number }).confidence_score ?? 0) >= 0.7)
+  } catch {
+    // Cross-file analysis is best-effort — never fail the whole pipeline
+    return []
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Parallel batch analysis entry point
 // Processes files in batches of PARALLEL_BATCH, with per-file hash caching.
 // ---------------------------------------------------------------------------
@@ -116,6 +204,14 @@ export const analyzeFilesInParallel = async (
         console.error('[analyzeFilesInParallel] batch item failed:', result.reason);
       }
     }
+  }
+
+  // Stage 3.5: Cross-file analysis
+  const fileSummaries = buildFileSummaries(files.map(f => ({ path: f.name, file_name: f.name, content: f.content })))
+  const crossFileIssues = await runCrossFileAnalysis(allIssues, fileSummaries, providerToken)
+  if (crossFileIssues.length > 0) {
+    allIssues.push(...crossFileIssues)
+    onProgress?.(`Cross-file analysis found ${crossFileIssues.length} additional issues`)
   }
 
   return allIssues;
