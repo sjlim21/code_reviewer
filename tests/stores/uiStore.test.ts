@@ -30,4 +30,14 @@ describe('uiStore', () => {
     })
     expect(useUiStore.getState().eventLogs).toHaveLength(100)
   })
+
+  it('setTheme persists to localStorage', () => {
+    act(() => useUiStore.getState().setTheme('emerald'))
+    expect(localStorage.getItem('codeeye-theme')).toBe('emerald')
+  })
+
+  it('setAiProvider persists to localStorage', () => {
+    act(() => useUiStore.getState().setAiProvider('claude'))
+    expect(localStorage.getItem('codeeye-ai-provider')).toBe('claude')
+  })
 })

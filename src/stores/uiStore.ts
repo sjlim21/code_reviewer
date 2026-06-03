@@ -23,18 +23,18 @@ interface UiState {
 
 const getInitialTheme = (): Theme => {
   try {
-    return (localStorage.getItem('theme') as Theme) || 'indigo'
-  } catch {
-    return 'indigo'
-  }
+    const stored = localStorage.getItem('codeeye-theme')
+    if (stored === 'emerald' || stored === 'amber' || stored === 'indigo') return stored
+  } catch {}
+  return 'indigo'
 }
 
 const getInitialAiProvider = (): AiProvider => {
   try {
-    return (localStorage.getItem('aiProvider') as AiProvider) || 'gemini'
-  } catch {
-    return 'gemini'
-  }
+    const stored = localStorage.getItem('codeeye-ai-provider')
+    if (stored === 'claude' || stored === 'gemini') return stored
+  } catch {}
+  return 'gemini'
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -45,7 +45,7 @@ export const useUiStore = create<UiState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setTheme: (theme) => {
     try {
-      localStorage.setItem('theme', theme)
+      localStorage.setItem('codeeye-theme', theme)
     } catch {
       // localStorage not available in some environments
     }
@@ -53,7 +53,7 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setAiProvider: (aiProvider) => {
     try {
-      localStorage.setItem('aiProvider', aiProvider)
+      localStorage.setItem('codeeye-ai-provider', aiProvider)
     } catch {
       // localStorage not available in some environments
     }
