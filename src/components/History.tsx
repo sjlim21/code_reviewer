@@ -70,6 +70,7 @@ export default function History() {
   const [runIssues, setRunIssues] = useState<Record<string, Issue[]>>({})
   const [runDiffs, setRunDiffs] = useState<Record<string, RunDiff>>({})
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
+  const [hideEmpty, setHideEmpty] = useState(false)
 
   useEffect(() => {
     if (!selectedProject?.id) return
@@ -158,8 +159,9 @@ export default function History() {
     }
   })
 
-  // Group runs by date (newest first)
-  const groupedRuns = [...runs].reverse().reduce((acc, run) => {
+  // Group runs by date (newest first), optionally filtering 0-issue runs
+  const displayRuns = hideEmpty ? runs.filter(r => r.issues_found > 0) : runs
+  const groupedRuns = [...displayRuns].reverse().reduce((acc, run) => {
     const dateKey = new Date(run.created_at).toLocaleDateString('ko-KR', {
       year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
     })
@@ -241,9 +243,16 @@ export default function History() {
 
           {/* Run timeline list — grouped by date */}
           <div className="rounded-xl border border-white/5 overflow-hidden">
-            <div className="px-4 py-2 bg-white/2 border-b border-white/5">
+            <div className="px-4 py-2 bg-white/2 border-b border-white/5 flex items-center justify-between">
               <p className="text-xs text-white/40 uppercase tracking-wider">분석 실행 목록 — 클릭하면 이슈 상세 보기</p>
+              <button
+                onClick={() => setHideEmpty(v => !v)}
+                className="text-xs text-white/30 hover:text-white/60 transition-colors"
+              >
+                {hideEmpty ? '이슈없음 포함' : '이슈없음 숨기기'}
+              </button>
             </div>
+            <div className="max-h-[560px] overflow-y-auto">
             {Object.entries(groupedRuns).map(([dateLabel, dayRuns]) => (
               <div key={dateLabel}>
                 {/* Date group header */}
@@ -270,8 +279,8 @@ export default function History() {
                       >
                         <div className="flex items-center gap-3">
                           <span className="text-white/20 text-xs">{isSelected ? '▼' : '▶'}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${triggerBadgeClass(run.trigger_type)}`}>
-                            {run.trigger_type}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${triggerBadgeClass(run.trigger_type ?? 'manual')}`}>
+                            {run.trigger_type ?? 'manual'}
                           </span>
                           <span className="text-sm text-white/60">
                             {new Date(run.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
@@ -362,6 +371,7 @@ export default function History() {
                 })}
               </div>
             ))}
+            </div>
           </div>
         </>
       )}
