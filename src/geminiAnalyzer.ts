@@ -11,15 +11,19 @@ import scorerPrompt from './agents/scorer_agent.md?raw';
 import reporterPrompt from './agents/reporter_agent.md?raw';
 import CROSS_FILE_AGENT from './agents/cross_file_agent.md?raw';
 
+// Bump when agent prompts change to invalidate stale cached analyses
+const PROMPT_CACHE_VERSION = 'v2';
+
 // ---------------------------------------------------------------------------
-// SHA-256 file hash utility
+// SHA-256 file hash utility (prefixed with prompt version for cache invalidation)
 // ---------------------------------------------------------------------------
 async function hashFileContent(content: string): Promise<string> {
   const buf = new TextEncoder().encode(content);
   const digest = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(digest))
+  const sha = Array.from(new Uint8Array(digest))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
+  return `${PROMPT_CACHE_VERSION}:${sha}`;
 }
 
 // ---------------------------------------------------------------------------

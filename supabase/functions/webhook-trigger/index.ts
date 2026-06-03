@@ -42,8 +42,9 @@ Deno.serve(async (req) => {
     const payload = JSON.parse(body)
     const projectId = payload.project_id as string | undefined
 
-    if (!projectId) {
-      return new Response(JSON.stringify({ error: 'project_id required in payload' }), {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!projectId || !UUID_REGEX.test(projectId)) {
+      return new Response(JSON.stringify({ error: 'Invalid or missing project_id' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
@@ -67,14 +68,19 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (project.webhook_secret && signature) {
-      const valid = await verifyGitHubSignature(body, signature, project.webhook_secret)
-      if (!valid) {
-        return new Response(JSON.stringify({ error: 'Invalid signature' }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
+    // Signature verification is mandatory — projects without a secret cannot use CI webhooks
+    if (!project.webhook_secret) {
+      return new Response(JSON.stringify({ error: 'Webhook secret not configured for this project. Set it in Settings.' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const valid = await verifyGitHubSignature(body, signature, project.webhook_secret)
+    if (!valid) {
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     const { data: run, error: runError } = await supabase
@@ -108,7 +114,8 @@ Deno.serve(async (req) => {
       { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
+    console.error('[webhook-trigger] Unhandled error:', err)
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

@@ -43,9 +43,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
     })
 
-    return supabase.auth.onAuthStateChange((_event, currentSession) => {
-      const state = useAuthStore.getState()
-      if (state.session?.user?.id !== currentSession?.user?.id) {
+    return supabase.auth.onAuthStateChange((event, currentSession) => {
+      // Sync on all relevant auth events including token refresh
+      if (
+        event === 'SIGNED_IN' ||
+        event === 'SIGNED_OUT' ||
+        event === 'TOKEN_REFRESHED' ||
+        event === 'USER_UPDATED'
+      ) {
         useAuthStore.getState().setSession(currentSession)
       }
       if (currentSession) {

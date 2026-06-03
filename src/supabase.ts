@@ -6,7 +6,10 @@ export const STORAGE_KEYS = {
   SUPABASE_ANON_KEY: 'code_eye_supabase_anon_key'
 };
 
-const deobfuscate = (str: string) => {
+// NOTE: base64 is encoding, NOT encryption. SessionStorage values are accessible
+// to same-origin JavaScript (XSS risk). This is intentional for Settings-based
+// credential input; do not add secrets that require true confidentiality here.
+const base64Decode = (str: string) => {
   if (!str) return '';
   try {
     return decodeURIComponent(atob(str));
@@ -35,8 +38,8 @@ export const getSupabaseClient = (): SupabaseClient | null => {
     localStorage.removeItem('code_eye_gemini_api_key');
   }
 
-  const localUrl = deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
-  const localKey = deobfuscate(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
+  const localUrl = base64Decode(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '');
+  const localKey = base64Decode(sessionStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '');
 
   const url = envUrl || localUrl || '';
   const key = envKey || localKey || '';

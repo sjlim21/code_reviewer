@@ -41,6 +41,12 @@ export const useAnalysis = ({
       return;
     }
 
+    const MAX_FILES = 50;
+    if (filesToAnalyze.length > MAX_FILES) {
+      setErrorMsg(`파일 수(${filesToAnalyze.length}개)가 브라우저 분석 한도(${MAX_FILES}개)를 초과합니다. 일부 파일을 제외하거나 CLI를 사용해 주세요.`);
+      return;
+    }
+
     const totalBytes = filesToAnalyze.reduce((acc, f) => acc + f.size, 0);
     const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
     if (totalBytes > MAX_TOTAL_BYTES) {
@@ -177,14 +183,16 @@ export const useAnalysis = ({
         }
       };
 
+      // Worker pool: exactly concurrencyLimit workers drain the queue in parallel
       const concurrencyLimit = 4;
-      const executing = new Set<Promise<void>>();
-      for (const file of filesToAnalyze) {
-        const p: Promise<void> = scanFile(file).then(() => { executing.delete(p); });
-        executing.add(p);
-        if (executing.size >= concurrencyLimit) await Promise.race(executing);
-      }
-      await Promise.all(executing);
+      const queue = [...filesToAnalyze];
+      const workers = Array.from({ length: concurrencyLimit }, async () => {
+        while (queue.length > 0) {
+          const file = queue.shift();
+          if (file) await scanFile(file);
+        }
+      });
+      await Promise.all(workers);
 
       setProgress(85);
       setCurrentScanningFile('Supabase DB 결과 갱신 중...');
