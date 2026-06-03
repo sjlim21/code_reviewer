@@ -8,6 +8,7 @@ import { CodeViewer } from './components/CodeViewer';
 import { Uploader } from './components/Uploader';
 import { Settings } from './components/Settings';
 import { Login } from './components/Login';
+import { AppShell } from './components/layout/AppShell';
 import {
   mockProjects,
   mockIssues,
@@ -15,9 +16,6 @@ import {
   type Issue
 } from './supabase';
 import {
-  LayoutDashboard,
-  UploadCloud,
-  Sliders,
   Terminal,
   Eye,
   GitBranch,
@@ -268,7 +266,7 @@ function AppContent() {
   void issues;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#0b0f19] to-[#080b12] text-slate-100 flex flex-col justify-between">
+    <div className="min-h-screen bg-gradient-to-b from-[#0b0f19] to-[#080b12] text-slate-100">
 
       {!isUsingRealDB && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[11px] font-semibold py-2.5 px-4 text-center flex items-center justify-center gap-2 z-50 animate-in fade-in duration-300">
@@ -282,9 +280,9 @@ function AppContent() {
         </div>
       )}
 
-      {/* Navigation Header */}
+      {/* Top Header Bar (logo + theme + profile) */}
       <header className="border-b border-[#26334a]/60 bg-[#131a26]/40 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="pl-60 pr-4 sm:pr-6 lg:pr-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/30 rounded-xl text-[var(--theme-accent)]">
               <Terminal size={22} className="animate-pulse" />
@@ -299,47 +297,7 @@ function AppContent() {
             </div>
           </div>
 
-          {/* Navigation Tabs & Session Profile */}
           <div className="flex items-center gap-6">
-            <nav className="flex items-center gap-2">
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                style={activeTab === 'dashboard' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'dashboard'
-                    ? 'text-white font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <LayoutDashboard size={14} />
-                대시보드
-              </button>
-              <button
-                onClick={() => setActiveTab('upload')}
-                style={activeTab === 'upload' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'upload'
-                    ? 'text-white font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <UploadCloud size={14} />
-                코드 분석
-              </button>
-              <button
-                onClick={() => setActiveTab('settings')}
-                style={activeTab === 'settings' ? { backgroundColor: 'var(--theme-accent)', boxShadow: '0 4px 12px var(--glow-accent-1)' } : undefined}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'settings'
-                    ? 'text-white font-bold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <Sliders size={14} />
-                분석 설정
-              </button>
-            </nav>
-
             {/* Theme Switcher */}
             <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 gap-1.5 shrink-0">
               <button
@@ -398,9 +356,8 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Main Contents */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
+      {/* AppShell: Sidebar + Main Content */}
+      <AppShell>
         {/* Project Context Info */}
         {selectedProject && (
           <div className="mb-6 p-4 bg-[#131a26]/30 border border-[#26334a]/40 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -441,27 +398,31 @@ function AppContent() {
 
         {/* Tab Router Switch */}
         {activeTab === 'dashboard' && <Dashboard />}
-
-        {activeTab === 'upload' && (
-          <div className="max-w-2xl mx-auto">
-            <Uploader />
+        {activeTab === 'upload' && <Uploader />}
+        {activeTab === 'history' && (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <p className="text-white/30">History — coming soon</p>
           </div>
         )}
-
-        {activeTab === 'settings' && <Settings />}
-
-        {/* Sidebar Slide Detail View overlay */}
-        {selectedIssue && (
-          <CodeViewer
-            issue={selectedIssue}
-            onClose={() => setSelectedIssue(null)}
-          />
+        {activeTab === 'reports' && (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <p className="text-white/30">Reports — coming soon</p>
+          </div>
         )}
-      </main>
+        {activeTab === 'settings' && <Settings />}
+      </AppShell>
+
+      {/* CodeViewer full-screen overlay (outside AppShell) */}
+      {selectedIssue && (
+        <CodeViewer
+          issue={selectedIssue}
+          onClose={() => setSelectedIssue(null)}
+        />
+      )}
 
       {/* Footer Info */}
-      <footer className="border-t border-[#26334a]/60 py-6 bg-[#0b0f19]">
-        <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-600 flex flex-col md:flex-row md:justify-between items-center gap-2">
+      <footer className="border-t border-[#26334a]/60 py-6 bg-[#0b0f19] pl-60">
+        <div className="px-4 text-center text-xs text-slate-600 flex flex-col md:flex-row md:justify-between items-center gap-2">
           <div>
             &copy; 2026 CODE EYE. AI-Powered Static Code Review Platform.
           </div>
