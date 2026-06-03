@@ -158,7 +158,8 @@ export async function callClaudeForScoring(
 
 const queryRagKnowledgeClaude = async (
   issueText: string,
-  language: string
+  language: string,
+  ragThreshold?: number
 ): Promise<{ source: string; id: string; title: string }[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -168,7 +169,8 @@ const queryRagKnowledgeClaude = async (
     const { data, error } = await supabase.rpc('match_rag_knowledge', {
       query_embedding: embedding,
       match_count: 5,
-      target_language: language
+      target_language: language,
+      match_threshold: ragThreshold ?? 0.5
     });
     if (error) return [];
     return (data || []).map((r: { source: string; ref_id: string; title: string }) => ({
@@ -186,6 +188,7 @@ export const analyzeCodeWithClaude = async (
   codeContent: string,
   projectId: string,
   runId: string,
+  options?: { ragThreshold?: number }
 ): Promise<Issue[]> => {
   if (!codeContent || codeContent.trim().length === 0) return [];
   if (codeContent.length > 1024 * 1024) {
@@ -322,7 +325,7 @@ export const analyzeCodeWithClaude = async (
   // ==========================================
   console.log(`[Claude RAG] 지식베이스 매칭 중...`);
   const issuesWithRag = await Promise.all(mergedRawIssues.map(async (issue) => {
-    const ragRefs = await queryRagKnowledgeClaude(`${issue.title}: ${issue.description}`, parsedResult.language);
+    const ragRefs = await queryRagKnowledgeClaude(`${issue.title}: ${issue.description}`, parsedResult.language, options?.ragThreshold);
     return { ...issue, rag_references: ragRefs };
   }));
 

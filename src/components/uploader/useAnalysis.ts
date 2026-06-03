@@ -33,9 +33,6 @@ export const useAnalysis = ({
   const [currentScanningFile, setCurrentScanningFile] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // ragThreshold is available for future use (e.g. filtering low-confidence RAG matches)
-  void ragThreshold;
-
   const performFolderAnalysis = async (filesList: File[]) => {
     const filesToAnalyze = filesList.filter(file => getValidationStatus(file).valid);
 
@@ -156,8 +153,8 @@ export const useAnalysis = ({
           });
 
           const detectedIssues = aiProvider === 'claude'
-            ? await analyzeCodeWithClaude(file.name, codeContent, activeProjId, runId || '')
-            : await analyzeCodeWithGemini(file.name, codeContent, activeProjId, runId || '', session?.provider_token || undefined, dualModelMode);
+            ? await analyzeCodeWithClaude(file.name, codeContent, activeProjId, runId || '', { ragThreshold })
+            : await analyzeCodeWithGemini(file.name, codeContent, activeProjId, runId || '', session?.provider_token || undefined, dualModelMode, { ragThreshold });
 
           codeContent = null;
           allDetectedIssues.push(...detectedIssues);

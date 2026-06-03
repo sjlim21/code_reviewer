@@ -403,7 +403,8 @@ CREATE POLICY "rag_knowledge_update_service" ON public.rag_knowledge
 CREATE OR REPLACE FUNCTION public.match_rag_knowledge(
   query_embedding VECTOR(768),
   match_count     INT DEFAULT 5,
-  target_language TEXT DEFAULT NULL
+  target_language TEXT DEFAULT NULL,
+  match_threshold FLOAT DEFAULT 0.5
 )
 RETURNS TABLE (
   id          UUID,
@@ -426,6 +427,7 @@ LANGUAGE sql STABLE AS $$
   FROM public.rag_knowledge rk
   WHERE
     rk.embedding IS NOT NULL
+    AND (1 - (rk.embedding <=> query_embedding)) > match_threshold
     AND (target_language IS NULL OR rk.languages @> ARRAY[target_language])
   ORDER BY rk.embedding <=> query_embedding
   LIMIT match_count;

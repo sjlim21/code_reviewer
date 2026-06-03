@@ -169,7 +169,8 @@ export const analyzeFilesInParallel = async (
   runId: string,
   providerToken?: string,
   onProgress?: (msg: string) => void,
-  dualModelMode?: boolean
+  dualModelMode?: boolean,
+  options?: { ragThreshold?: number }
 ): Promise<Issue[]> => {
   const supabase = getSupabaseClient();
   const allIssues: Issue[] = [];
@@ -194,7 +195,8 @@ export const analyzeFilesInParallel = async (
           projectId,
           runId,
           providerToken,
-          dualModelMode
+          dualModelMode,
+          options
         );
         return triageByConfidence(issues);
       })
@@ -733,7 +735,8 @@ const getGeminiEmbedding = async (
 
 const queryRagKnowledge = async (
   embedding: number[],
-  language: string
+  language: string,
+  ragThreshold?: number
 ): Promise<RagKnowledgeRow[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -741,7 +744,8 @@ const queryRagKnowledge = async (
     const { data, error } = await supabase.rpc('match_rag_knowledge', {
       query_embedding: embedding,
       match_count: 5,
-      target_language: language
+      target_language: language,
+      match_threshold: ragThreshold ?? 0.5
     });
     if (error) {
       console.warn("RAG query failed via RPC:", error);
@@ -760,7 +764,8 @@ export const analyzeCodeWithGemini = async (
   projectId: string,
   runId: string,
   providerToken?: string,
-  dualModelMode?: boolean
+  dualModelMode?: boolean,
+  options?: { ragThreshold?: number }
 ): Promise<Issue[]> => {
   // 1. 입력 데이터 검증
   if (!codeContent || codeContent.trim().length === 0) {
@@ -933,7 +938,7 @@ export const analyzeCodeWithGemini = async (
         const embedding = await getGeminiEmbedding(queryText, '', providerToken);
         let ragReferences: RagKnowledgeRow[] = [];
         if (embedding) {
-          ragReferences = await queryRagKnowledge(embedding, parsedResult.language);
+          ragReferences = await queryRagKnowledge(embedding, parsedResult.language, options?.ragThreshold);
         }
         return {
           ...issue,
