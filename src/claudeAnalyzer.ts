@@ -137,6 +137,25 @@ const callClaude = async (
 };
 
 
+// ---------------------------------------------------------------------------
+// Named exports for dual-model mode: Gemini stages 1-4, Claude stages 5-6
+// ---------------------------------------------------------------------------
+export async function callClaudeForVerification(
+  systemPrompt: string,
+  userPrompt: string,
+  outputSchema?: object
+): Promise<string> {
+  return callClaude(systemPrompt, userPrompt, outputSchema);
+}
+
+export async function callClaudeForScoring(
+  systemPrompt: string,
+  userPrompt: string,
+  outputSchema?: object
+): Promise<string> {
+  return callClaude(systemPrompt, userPrompt, outputSchema);
+}
+
 const queryRagKnowledgeClaude = async (
   issueText: string,
   language: string

@@ -3,6 +3,7 @@ import { getSupabaseClient, type Issue, type Project } from '../../supabase';
 import { analyzeCodeWithGemini, triageByConfidence } from '../../geminiAnalyzer';
 import { analyzeCodeWithClaude } from '../../claudeAnalyzer';
 import { getValidationStatus } from './StagedFilesList';
+import { useUiStore } from '../../stores/uiStore';
 
 interface UseAnalysisOptions {
   selectedProject: Project | null;
@@ -23,12 +24,17 @@ export const useAnalysis = ({
   onProjectCreated,
   onAnalysisComplete,
 }: UseAnalysisOptions) => {
+  const { dualModelMode, ragThreshold } = useUiStore();
+
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'done'>('idle');
   const [progress, setProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [totalFilesCount, setTotalFilesCount] = useState(0);
   const [currentScanningFile, setCurrentScanningFile] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // ragThreshold is available for future use (e.g. filtering low-confidence RAG matches)
+  void ragThreshold;
 
   const performFolderAnalysis = async (filesList: File[]) => {
     const filesToAnalyze = filesList.filter(file => getValidationStatus(file).valid);
@@ -151,7 +157,7 @@ export const useAnalysis = ({
 
           const detectedIssues = aiProvider === 'claude'
             ? await analyzeCodeWithClaude(file.name, codeContent, activeProjId, runId || '')
-            : await analyzeCodeWithGemini(file.name, codeContent, activeProjId, runId || '', session?.provider_token || undefined);
+            : await analyzeCodeWithGemini(file.name, codeContent, activeProjId, runId || '', session?.provider_token || undefined, dualModelMode);
 
           codeContent = null;
           allDetectedIssues.push(...detectedIssues);

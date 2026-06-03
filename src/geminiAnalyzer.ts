@@ -1,4 +1,5 @@
 import { getSupabaseClient, type Issue } from './supabase';
+import { callClaudeForVerification, callClaudeForScoring } from './claudeAnalyzer';
 import generalPrompt from './agents/code-reviewer-agent.md?raw';
 import parserPrompt from './agents/parser_agent.md?raw';
 import specialistCppPrompt from './agents/specialist_cpp.md?raw';
@@ -167,7 +168,8 @@ export const analyzeFilesInParallel = async (
   projectId: string,
   runId: string,
   providerToken?: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  dualModelMode?: boolean
 ): Promise<Issue[]> => {
   const supabase = getSupabaseClient();
   const allIssues: Issue[] = [];
@@ -191,7 +193,8 @@ export const analyzeFilesInParallel = async (
           file.content,
           projectId,
           runId,
-          providerToken
+          providerToken,
+          dualModelMode
         );
         return triageByConfidence(issues);
       })
@@ -756,7 +759,8 @@ export const analyzeCodeWithGemini = async (
   codeContent: string,
   projectId: string,
   runId: string,
-  providerToken?: string
+  providerToken?: string,
+  dualModelMode?: boolean
 ): Promise<Issue[]> => {
   // 1. 입력 데이터 검증
   if (!codeContent || codeContent.trim().length === 0) {
@@ -1009,14 +1013,16 @@ export const analyzeCodeWithGemini = async (
       raw_issues: issuesWithRag
     });
 
-    const verifierResponseText = await callGemini(
-      verifierPrompt,
-      verifierUserPrompt,
-      '',
-      providerToken,
-      verifierSchema,
-      "application/json"
-    );
+    const verifierResponseText = dualModelMode
+      ? await callClaudeForVerification(verifierPrompt, verifierUserPrompt, verifierSchema)
+      : await callGemini(
+          verifierPrompt,
+          verifierUserPrompt,
+          '',
+          providerToken,
+          verifierSchema,
+          "application/json"
+        );
 
     let verifierResult: VerifierResult;
     try {
@@ -1070,14 +1076,16 @@ export const analyzeCodeWithGemini = async (
       verified_issues: verifiedIssues
     });
 
-    const scorerResponseText = await callGemini(
-      scorerPrompt,
-      scorerUserPrompt,
-      '',
-      providerToken,
-      scorerSchema,
-      "application/json"
-    );
+    const scorerResponseText = dualModelMode
+      ? await callClaudeForScoring(scorerPrompt, scorerUserPrompt, scorerSchema)
+      : await callGemini(
+          scorerPrompt,
+          scorerUserPrompt,
+          '',
+          providerToken,
+          scorerSchema,
+          "application/json"
+        );
 
     let scorerResult: ScorerResult;
     try {
