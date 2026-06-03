@@ -9,6 +9,118 @@ import verifierPrompt from './agents/verifier_agent.md?raw';
 import scorerPrompt from './agents/scorer_agent.md?raw';
 import reporterPrompt from './agents/reporter_agent.md?raw';
 
+// ---------------------------------------------------------------------------
+// SHA-256 file hash utility
+// ---------------------------------------------------------------------------
+async function hashFileContent(content: string): Promise<string> {
+  const buf = new TextEncoder().encode(content);
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// ---------------------------------------------------------------------------
+// Cache-check: look up a completed analysis_run for this hash+project and
+// return its issues, or null when no cache entry exists.
+// ---------------------------------------------------------------------------
+async function getCachedIssues(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  fileHash: string,
+  projectId: string
+): Promise<Issue[] | null> {
+  if (!supabase) return null;
+  const { data: run } = await supabase
+    .from('analysis_runs')
+    .select('id')
+    .eq('file_hash', fileHash)
+    .eq('project_id', projectId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!run) return null;
+
+  const { data: issues } = await supabase
+    .from('issues')
+    .select('*')
+    .eq('analysis_run_id', run.id);
+
+  return (issues as Issue[]) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-triage: issues with confidence_score < 0.6 get flagged for human review
+// ---------------------------------------------------------------------------
+export function triageByConfidence(issues: Issue[]): Issue[] {
+  return issues.map(issue => {
+    const score = issue.confidence_score ?? 1;
+    if (score < 0.6) {
+      return { ...issue, status: 'pending_review' as const, human_review_required: true };
+    }
+    return issue;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Parallel batch analysis entry point
+// Processes files in batches of PARALLEL_BATCH, with per-file hash caching.
+// ---------------------------------------------------------------------------
+const PARALLEL_BATCH = 3;
+
+export interface FileEntry {
+  name: string;
+  content: string;
+}
+
+export const analyzeFilesInParallel = async (
+  files: FileEntry[],
+  projectId: string,
+  runId: string,
+  providerToken?: string,
+  onProgress?: (msg: string) => void
+): Promise<Issue[]> => {
+  const supabase = getSupabaseClient();
+  const allIssues: Issue[] = [];
+
+  for (let i = 0; i < files.length; i += PARALLEL_BATCH) {
+    const batch = files.slice(i, i + PARALLEL_BATCH);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (file) => {
+        const fileHash = await hashFileContent(file.content);
+
+        // Cache hit: reuse issues from a prior completed run
+        const cached = await getCachedIssues(supabase, fileHash, projectId);
+        if (cached) {
+          onProgress?.(`Cache hit: ${file.name}`);
+          return triageByConfidence(cached);
+        }
+
+        onProgress?.(`Analyzing: ${file.name}`);
+        const issues = await analyzeCodeWithGemini(
+          file.name,
+          file.content,
+          projectId,
+          runId,
+          providerToken
+        );
+        return triageByConfidence(issues);
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result.status === 'fulfilled' && result.value) {
+        allIssues.push(...result.value);
+      } else if (result.status === 'rejected') {
+        console.error('[analyzeFilesInParallel] batch item failed:', result.reason);
+      }
+    }
+  }
+
+  return allIssues;
+};
+
 interface Chunk {
   chunk_id: string;
   line_start: number;

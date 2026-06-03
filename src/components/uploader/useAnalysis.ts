@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { getSupabaseClient, type Issue, type Project } from '../../supabase';
-import { analyzeCodeWithGemini } from '../../geminiAnalyzer';
+import { analyzeCodeWithGemini, triageByConfidence } from '../../geminiAnalyzer';
 import { analyzeCodeWithClaude } from '../../claudeAnalyzer';
 import { getValidationStatus } from './StagedFilesList';
 
@@ -181,9 +181,12 @@ export const useAnalysis = ({
       setCurrentScanningFile('Supabase DB 결과 갱신 중...');
 
       if (supabase) {
-        if (allDetectedIssues.length > 0) {
+        // Apply confidence-based auto-triage before persisting
+        const issuesToInsert = triageByConfidence(allDetectedIssues);
+
+        if (issuesToInsert.length > 0) {
           const { error: issuesError } = await supabase.from('issues').insert(
-            allDetectedIssues.map(issue => ({
+            issuesToInsert.map(issue => ({
               project_id: issue.project_id,
               analysis_run_id: issue.analysis_run_id,
               title: issue.title,
@@ -197,7 +200,9 @@ export const useAnalysis = ({
               line_start: issue.line_start,
               line_end: issue.line_end,
               code_snippet: issue.code_snippet,
-              status: 'open'
+              status: issue.status,
+              confidence_score: issue.confidence_score ?? null,
+              human_review_required: issue.human_review_required ?? false
             }))
           );
           if (issuesError) throw issuesError;
