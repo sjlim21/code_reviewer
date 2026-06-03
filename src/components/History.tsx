@@ -36,8 +36,13 @@ export default function History() {
   useEffect(() => {
     if (!selectedProject?.id) return
     const projectId = selectedProject.id
+    const client = getSupabaseClient()
+    if (!client) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    getSupabaseClient()
+    client
       .from('analysis_runs')
       .select('*')
       .eq('project_id', projectId)
