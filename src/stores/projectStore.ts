@@ -4,8 +4,10 @@ import type { Project } from '../supabase'
 interface ProjectState {
   projects: Project[]
   selectedProject: Project | null
+  isUsingRealDB: boolean
   setProjects: (projects: Project[]) => void
   setSelectedProject: (project: Project | null) => void
+  setIsUsingRealDB: (value: boolean) => void
   upsertProject: (project: Project) => void
   removeProject: (id: string) => void
 }
@@ -13,8 +15,10 @@ interface ProjectState {
 export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   selectedProject: null,
+  isUsingRealDB: false,
   setProjects: (projects) => set({ projects }),
   setSelectedProject: (selectedProject) => set({ selectedProject }),
+  setIsUsingRealDB: (isUsingRealDB) => set({ isUsingRealDB }),
   upsertProject: (project) =>
     set((state) => ({
       projects: state.projects.some((p) => p.id === project.id)

@@ -5,6 +5,7 @@ export type AiProvider = 'gemini' | 'claude'
 export type TabName = 'dashboard' | 'upload' | 'history' | 'reports' | 'settings'
 
 export interface EventLog {
+  id: string
   message: string
   type: 'info' | 'success' | 'warning' | 'error'
   timestamp: number
@@ -19,6 +20,8 @@ interface UiState {
   setTheme: (theme: Theme) => void
   setAiProvider: (provider: AiProvider) => void
   addEventLog: (log: EventLog) => void
+  addLog: (message: string, type?: EventLog['type']) => void
+  clearEventLogs: () => void
 }
 
 const getInitialTheme = (): Theme => {
@@ -63,4 +66,25 @@ export const useUiStore = create<UiState>((set) => ({
     set((state) => ({
       eventLogs: [...state.eventLogs.slice(-99), log],
     })),
+  addLog: (message, type = 'info') => {
+    const log: EventLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      message,
+      type,
+      timestamp: Date.now(),
+    }
+    set((state) => ({
+      eventLogs: [...state.eventLogs.slice(-99), log],
+    }))
+  },
+  clearEventLogs: () =>
+    set((_state) => {
+      const initLog: EventLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        message: '시스템 이벤트 콘솔이 초기화되었습니다.',
+        type: 'info',
+        timestamp: Date.now(),
+      }
+      return { eventLogs: [initLog] }
+    }),
 }))

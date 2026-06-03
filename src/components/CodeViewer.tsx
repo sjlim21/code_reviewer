@@ -156,7 +156,16 @@ const DiffCodeBlock: React.FC<DiffCodeBlockProps> = ({ code, otherCode, isOrigin
 };
 
 
-import { useAppContext } from '../context/AppContext';
+import { useAuthStore } from '../stores/authStore';
+import { useIssueStore } from '../stores/issueStore';
+import { useProjectStore } from '../stores/projectStore';
+import { useUiStore } from '../stores/uiStore';
+import { getSupabaseClient } from '../supabase';
+
+const deobfuscateStr = (str: string): string => {
+  if (!str) return '';
+  try { return decodeURIComponent(atob(str)); } catch { return ''; }
+};
 
 interface CodeViewerProps {
   issue: Issue | null;
@@ -167,7 +176,68 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
   issue,
   onClose
 }) => {
-  const { handleUpdateStatus: onUpdateStatus } = useAppContext();
+  const { session } = useAuthStore();
+  const { issues, selectedIssue, setIssues, setSelectedIssue, updateIssueStatus } = useIssueStore();
+  const { isUsingRealDB } = useProjectStore();
+  const { addLog } = useUiStore();
+
+  const onUpdateStatus = async (issueId: string, newStatus: Issue['status']) => {
+    const previousIssues = [...issues];
+    const previousSelectedIssue = selectedIssue ? { ...selectedIssue } : null;
+    const targetIssue = issues.find(i => i.id === issueId);
+    const title = targetIssue ? targetIssue.title : issueId;
+
+    addLog(`[이슈 변경] 결함 [${title}]의 상태를 '${newStatus}'(으)로 변경 중...`, 'info');
+
+    updateIssueStatus(issueId, newStatus);
+    if (selectedIssue && selectedIssue.id === issueId) {
+      setSelectedIssue({ ...selectedIssue, status: newStatus });
+    }
+
+    if (isUsingRealDB) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('issues')
+            .update({
+              status: newStatus,
+              resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null,
+              resolved_by: session?.user?.id || null
+            })
+            .eq('id', issueId);
+          if (error) throw error;
+          addLog('[이슈 변경 완료] DB 업데이트 성공.', 'success');
+        } catch (e) {
+          console.error('DB status update failed. Rolling back state:', e);
+          addLog('[에러] 이슈 변경 실패, 롤백 수행.', 'error');
+          alert('데이터베이스 업데이트 실패로 변경 사항이 롤백되었습니다.');
+          setIssues(previousIssues);
+          setSelectedIssue(previousSelectedIssue);
+        }
+      }
+    } else {
+      addLog('[이슈 변경 완료] 로컬 세션 상태 업데이트 완료.', 'success');
+    }
+
+    // Webhook notifications
+    const slack = deobfuscateStr(sessionStorage.getItem('code_eye_slack_webhook_url') || '');
+    const discord = deobfuscateStr(sessionStorage.getItem('code_eye_discord_webhook_url') || '');
+    if (slack || discord) {
+      addLog('[웹훅 연동] 결함 상태 변경 이벤트 알림 전송 시작...', 'info');
+      const payload = JSON.stringify({ text: `[CodeEye] 이슈 상태 변경: ${newStatus}` });
+      if (slack) {
+        fetch(slack, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+          .then(() => addLog(`[웹훅 연동] Slack 채널로 [${newStatus}] 알림 전송 성공`, 'success'))
+          .catch((e) => addLog(`[웹훅 연동] Slack 알림 전송 실패: ${String(e)}`, 'error'));
+      }
+      if (discord) {
+        fetch(discord, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+          .then(() => addLog(`[웹훅 연동] Discord 채널로 [${newStatus}] 알림 전송 성공`, 'success'))
+          .catch((e) => addLog(`[웹훅 연동] Discord 알림 전송 실패: ${String(e)}`, 'error'));
+      }
+    }
+  };
   const [newCommentText, setNewCommentText] = useState('');
   const [commentTrigger, setCommentTrigger] = useState(0);
   const [viewMode, setViewMode] = useState<'split' | 'stacked'>('split');

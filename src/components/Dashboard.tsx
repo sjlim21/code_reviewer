@@ -1,5 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useProjectStore } from '../stores/projectStore';
+import { useIssueStore } from '../stores/issueStore';
+import { useUiStore } from '../stores/uiStore';
+import { getSupabaseClient } from '../supabase';
 import { StatsCards } from './dashboard/StatsCards';
 import { TrendChart } from './dashboard/TrendChart';
 import { IssueFilters } from './dashboard/IssueFilters';
@@ -8,14 +11,51 @@ import { IssueTable } from './dashboard/IssueTable';
 import { HealthStats } from './dashboard/HealthStats';
 
 export const Dashboard: React.FC = () => {
-  const {
-    selectedProject,
-    setSelectedProject: onSelectProject,
-    setSelectedIssue: onSelectIssue,
-    issues,
-    projects,
-    handleDeleteProject: onDeleteProject
-  } = useAppContext();
+  const { selectedProject, projects, isUsingRealDB, setSelectedProject: onSelectProject, removeProject } = useProjectStore();
+  const { issues, setIssues, setSelectedIssue: onSelectIssue } = useIssueStore();
+  const { addLog } = useUiStore();
+
+  const onDeleteProject = async (projectId: string) => {
+    const targetProj = projects.find(p => p.id === projectId);
+    const name = targetProj ? targetProj.name : projectId;
+
+    if (!window.confirm('정말로 이 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며, 프로젝트와 연결된 모든 이슈 및 분석 이력이 영구적으로 제거됩니다.')) {
+      return;
+    }
+
+    addLog(`[프로젝트 삭제] '${name}' 프로젝트를 삭제하는 중...`, 'info');
+
+    if (isUsingRealDB) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { error } = await supabase.from('projects').delete().eq('id', projectId);
+          if (error) throw error;
+          addLog('[프로젝트 삭제 완료] DB 삭제 성공.', 'success');
+        } catch (e) {
+          console.error('DB project delete failed:', e);
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          addLog(`[에러] 프로젝트 DB 삭제 실패: ${errorMsg}`, 'error');
+          alert('프로젝트 삭제 중 에러가 발생했습니다: ' + errorMsg);
+          return;
+        }
+      }
+    } else {
+      addLog('[프로젝트 삭제 완료] 로컬 데이터 삭제 완료.', 'success');
+    }
+
+    const updatedProjects = projects.filter(p => p.id !== projectId);
+    removeProject(projectId);
+
+    if (selectedProject?.id === projectId) {
+      if (updatedProjects.length > 0) {
+        onSelectProject(updatedProjects[0]);
+      } else {
+        onSelectProject(null);
+        setIssues([]);
+      }
+    }
+  };
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
