@@ -8,6 +8,8 @@ beforeEach(() => {
     theme: 'indigo',
     aiProvider: 'gemini',
     eventLogs: [],
+    dualModelMode: false,
+    ragThreshold: 0.5,
   })
 })
 
@@ -39,5 +41,17 @@ describe('uiStore', () => {
   it('setAiProvider persists to localStorage', () => {
     act(() => useUiStore.getState().setAiProvider('claude'))
     expect(localStorage.getItem('codeeye-ai-provider')).toBe('claude')
+  })
+
+  it('setDualModelMode persists to localStorage', () => {
+    act(() => useUiStore.getState().setDualModelMode(true))
+    expect(useUiStore.getState().dualModelMode).toBe(true)
+    expect(localStorage.getItem('dualModelMode')).toBe('true')
+  })
+
+  it('setRagThreshold updates value', () => {
+    act(() => useUiStore.getState().setRagThreshold(0.7))
+    expect(useUiStore.getState().ragThreshold).toBe(0.7)
+    expect(localStorage.getItem('ragThreshold')).toBe('0.7')
   })
 })

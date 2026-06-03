@@ -16,9 +16,13 @@ interface UiState {
   theme: Theme
   aiProvider: AiProvider
   eventLogs: EventLog[]
+  dualModelMode: boolean
+  ragThreshold: number
   setActiveTab: (tab: TabName) => void
   setTheme: (theme: Theme) => void
   setAiProvider: (provider: AiProvider) => void
+  setDualModelMode: (value: boolean) => void
+  setRagThreshold: (value: number) => void
   addEventLog: (log: EventLog) => void
   addLog: (message: string, type?: EventLog['type']) => void
   clearEventLogs: () => void
@@ -40,11 +44,31 @@ const getInitialAiProvider = (): AiProvider => {
   return 'gemini'
 }
 
+const getInitialDualModelMode = (): boolean => {
+  try {
+    return localStorage.getItem('dualModelMode') === 'true'
+  } catch {}
+  return false
+}
+
+const getInitialRagThreshold = (): number => {
+  try {
+    const stored = localStorage.getItem('ragThreshold')
+    if (stored) {
+      const parsed = parseFloat(stored)
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) return parsed
+    }
+  } catch {}
+  return 0.5
+}
+
 export const useUiStore = create<UiState>((set) => ({
   activeTab: 'dashboard',
   theme: getInitialTheme(),
   aiProvider: getInitialAiProvider(),
   eventLogs: [],
+  dualModelMode: getInitialDualModelMode(),
+  ragThreshold: getInitialRagThreshold(),
   setActiveTab: (tab) => set({ activeTab: tab }),
   setTheme: (theme) => {
     try {
@@ -61,6 +85,22 @@ export const useUiStore = create<UiState>((set) => ({
       // localStorage not available in some environments
     }
     set({ aiProvider })
+  },
+  setDualModelMode: (dualModelMode) => {
+    try {
+      localStorage.setItem('dualModelMode', String(dualModelMode))
+    } catch {
+      // localStorage not available in some environments
+    }
+    set({ dualModelMode })
+  },
+  setRagThreshold: (ragThreshold) => {
+    try {
+      localStorage.setItem('ragThreshold', String(ragThreshold))
+    } catch {
+      // localStorage not available in some environments
+    }
+    set({ ragThreshold })
   },
   addEventLog: (log) =>
     set((state) => ({
