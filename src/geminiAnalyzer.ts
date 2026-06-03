@@ -170,7 +170,7 @@ export const analyzeFilesInParallel = async (
   providerToken?: string,
   onProgress?: (msg: string) => void,
   dualModelMode?: boolean,
-  options?: { ragThreshold?: number }
+  options?: { ragThreshold?: number; outputLanguage?: 'ko' | 'en' }
 ): Promise<Issue[]> => {
   const supabase = getSupabaseClient();
   const allIssues: Issue[] = [];
@@ -765,7 +765,7 @@ export const analyzeCodeWithGemini = async (
   runId: string,
   providerToken?: string,
   dualModelMode?: boolean,
-  options?: { ragThreshold?: number }
+  options?: { ragThreshold?: number; outputLanguage?: 'ko' | 'en' }
 ): Promise<Issue[]> => {
   // 1. 입력 데이터 검증
   if (!codeContent || codeContent.trim().length === 0) {
@@ -1162,7 +1162,8 @@ export const analyzeCodeWithGemini = async (
       analysis_run_id: runId,
       raw_issues: issuesWithRag,
       verified_issues: verifiedIssues,
-      scored_issues: scorerResult.scored_issues
+      scored_issues: scorerResult.scored_issues,
+      output_language: options?.outputLanguage ?? 'en',
     });
 
     const reporterResponseText = await callGemini(
