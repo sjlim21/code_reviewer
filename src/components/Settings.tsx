@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { STORAGE_KEYS } from '../supabase';
 import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database, Info } from 'lucide-react';
 
-import { useAppContext } from '../context/AppContext';
+import { useAuthStore } from '../stores/authStore';
+import { useProjectStore } from '../stores/projectStore';
+import { useUiStore } from '../stores/uiStore';
 
 interface RuleConfig {
   id: string;
@@ -66,17 +68,9 @@ const DEFAULT_RULE_DEFINITIONS = [
 ];
 
 export const Settings: React.FC = () => {
-  const {
-    selectedProject: project,
-    isUsingRealDB,
-    session,
-    isDemoSession,
-    eventLogs,
-    clearEventLogs,
-    addEventLog,
-    aiProvider,
-    setAiProvider
-  } = useAppContext();
+  const { session, isDemoSession } = useAuthStore();
+  const { selectedProject: project, isUsingRealDB } = useProjectStore();
+  const { eventLogs, clearEventLogs, addLog: addEventLog, aiProvider, setAiProvider } = useUiStore();
 
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
@@ -531,7 +525,7 @@ export const Settings: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const text = eventLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
+                    const text = eventLogs.map(l => `[${new Date(l.timestamp).toLocaleTimeString('ko-KR', { hour12: false })}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
                     navigator.clipboard.writeText(text);
                     addEventLog('이벤트 로그 복사 완료.', 'success');
                   }}
@@ -553,7 +547,7 @@ export const Settings: React.FC = () => {
               {eventLogs.length > 0 ? (
                 eventLogs.slice().reverse().map((log, idx) => (
                   <div key={log.id} className="leading-relaxed flex items-start gap-1">
-                    <span className="text-slate-600 shrink-0 select-none">[{log.timestamp}]</span>
+                    <span className="text-slate-600 shrink-0 select-none">[{new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour12: false })}]</span>
                     <span className={`font-bold shrink-0 select-none ${
                       log.type === 'success' ? 'text-emerald-500' :
                       log.type === 'warning' ? 'text-amber-500' :
