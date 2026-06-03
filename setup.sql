@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS public.analysis_runs (
   error_message       TEXT,
   started_at          TIMESTAMPTZ,
   completed_at        TIMESTAMPTZ,
+  trigger_type        TEXT NOT NULL DEFAULT 'manual'
+    CONSTRAINT analysis_runs_trigger_type_check
+    CHECK (trigger_type IN ('manual', 'ci', 'api')),
+  file_hash           TEXT,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -196,6 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_status ON public.issues (project_id, statu
 CREATE INDEX IF NOT EXISTS idx_issues_assignee ON public.issues (assignee_id) WHERE assignee_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_issues_category ON public.issues (project_id, category);
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_project ON public.analysis_runs (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_file_hash ON public.analysis_runs(file_hash) WHERE file_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON public.notifications (user_id, is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON public.issue_comments (issue_id, created_at);
 
@@ -398,7 +403,8 @@ CREATE POLICY "rag_knowledge_update_service" ON public.rag_knowledge
 CREATE OR REPLACE FUNCTION public.match_rag_knowledge(
   query_embedding VECTOR(768),
   match_count     INT DEFAULT 5,
-  target_language TEXT DEFAULT NULL
+  target_language TEXT DEFAULT NULL,
+  match_threshold FLOAT DEFAULT 0.5
 )
 RETURNS TABLE (
   id          UUID,
@@ -421,6 +427,7 @@ LANGUAGE sql STABLE AS $$
   FROM public.rag_knowledge rk
   WHERE
     rk.embedding IS NOT NULL
+    AND (1 - (rk.embedding <=> query_embedding)) > match_threshold
     AND (target_language IS NULL OR rk.languages @> ARRAY[target_language])
   ORDER BY rk.embedding <=> query_embedding
   LIMIT match_count;

@@ -1,4 +1,5 @@
 import { getSupabaseClient, type Issue } from './supabase';
+import { callClaudeForVerification, callClaudeForScoring } from './claudeAnalyzer';
 import generalPrompt from './agents/code-reviewer-agent.md?raw';
 import parserPrompt from './agents/parser_agent.md?raw';
 import specialistCppPrompt from './agents/specialist_cpp.md?raw';
@@ -8,6 +9,218 @@ import specialistJvmClrPrompt from './agents/specialist_jvm_clr.md?raw';
 import verifierPrompt from './agents/verifier_agent.md?raw';
 import scorerPrompt from './agents/scorer_agent.md?raw';
 import reporterPrompt from './agents/reporter_agent.md?raw';
+import CROSS_FILE_AGENT from './agents/cross_file_agent.md?raw';
+
+// ---------------------------------------------------------------------------
+// SHA-256 file hash utility
+// ---------------------------------------------------------------------------
+async function hashFileContent(content: string): Promise<string> {
+  const buf = new TextEncoder().encode(content);
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// ---------------------------------------------------------------------------
+// Cache-check: look up a completed analysis_run for this hash+project and
+// return its issues, or null when no cache entry exists.
+// ---------------------------------------------------------------------------
+async function getCachedIssues(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  fileHash: string,
+  projectId: string
+): Promise<Issue[] | null> {
+  if (!supabase) return null;
+  const { data: run } = await supabase
+    .from('analysis_runs')
+    .select('id')
+    .eq('file_hash', fileHash)
+    .eq('project_id', projectId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!run) return null;
+
+  const { data: issues } = await supabase
+    .from('issues')
+    .select('*')
+    .eq('analysis_run_id', run.id);
+
+  return (issues as Issue[]) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-triage: issues with confidence_score < 0.6 get flagged for human review
+// ---------------------------------------------------------------------------
+export function triageByConfidence(issues: Issue[]): Issue[] {
+  return issues.map(issue => {
+    const score = issue.confidence_score ?? 1;
+    if (score < 0.6) {
+      return { ...issue, status: 'pending_review' as const, human_review_required: true };
+    }
+    return issue;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cross-file analysis types and helpers
+// ---------------------------------------------------------------------------
+interface FileSummary {
+  path: string
+  language: string
+  functions: string[]
+  imports: string[]
+  exports: string[]
+}
+
+function buildFileSummaries(files: Array<{ path?: string; file_name?: string; content?: string; code?: string; language?: string }>): FileSummary[] {
+  return files.map(file => {
+    const content = file.content ?? file.code ?? ''
+    const path = file.path ?? file.file_name ?? 'unknown'
+
+    // Extract function names (simple regex — good enough for summary)
+    const functionMatches = content.match(/(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[\w]+)\s*=>|(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{)/g) ?? []
+    const functions = functionMatches.slice(0, 20).map(m => m.split(/[\s(]/)[1] ?? m).filter(Boolean)
+
+    // Extract imports
+    const importMatches = content.match(/(?:import|require)\s*(?:\(['"](.*?)['"]\)|[^'"]*['"](.*?)['"])/g) ?? []
+    const imports = importMatches.slice(0, 15).map(m => {
+      const match = m.match(/['"](.*?)['"]/)
+      return match?.[1] ?? ''
+    }).filter(Boolean)
+
+    // Extract exports
+    const exportMatches = content.match(/export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)/g) ?? []
+    const exports = exportMatches.slice(0, 15).map(m => m.split(/\s+/).pop() ?? '').filter(Boolean)
+
+    return {
+      path,
+      language: file.language ?? 'unknown',
+      functions,
+      imports,
+      exports,
+    }
+  })
+}
+
+async function runCrossFileAnalysis(
+  allIssues: Issue[],
+  fileSummaries: FileSummary[],
+  providerToken?: string
+): Promise<Issue[]> {
+  if (fileSummaries.length < 2) return []  // no point on single file
+
+  const input = {
+    existing_issues: allIssues.map(i => ({
+      title: i.title,
+      file_path: i.file_path,
+      line: i.line_start,
+      category: i.category,
+    })),
+    file_summaries: fileSummaries,
+  }
+
+  try {
+    const resultText = await callGemini(
+      CROSS_FILE_AGENT,
+      `Input:\n${JSON.stringify(input)}`,
+      '',
+      providerToken
+    )
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(resultText)
+    } catch {
+      const jsonMatch = resultText.match(/\[\s*\{[\s\S]*\}\s*\]/)
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0])
+      } else {
+        return []
+      }
+    }
+
+    const crossIssues = (Array.isArray(parsed) ? parsed : []) as Issue[]
+    // Only keep high-confidence cross-file findings
+    return crossIssues.filter(i => ((i as unknown as { confidence_score?: number }).confidence_score ?? 0) >= 0.7)
+  } catch {
+    // Cross-file analysis is best-effort — never fail the whole pipeline
+    return []
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Parallel batch analysis entry point
+// Processes files in batches of PARALLEL_BATCH, with per-file hash caching.
+// ---------------------------------------------------------------------------
+const PARALLEL_BATCH = 3;
+
+export interface FileEntry {
+  name: string;
+  content: string;
+}
+
+export const analyzeFilesInParallel = async (
+  files: FileEntry[],
+  projectId: string,
+  runId: string,
+  providerToken?: string,
+  onProgress?: (msg: string) => void,
+  dualModelMode?: boolean,
+  options?: { ragThreshold?: number; outputLanguage?: 'ko' | 'en' }
+): Promise<Issue[]> => {
+  const supabase = getSupabaseClient();
+  const allIssues: Issue[] = [];
+
+  for (let i = 0; i < files.length; i += PARALLEL_BATCH) {
+    const batch = files.slice(i, i + PARALLEL_BATCH);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (file) => {
+        const fileHash = await hashFileContent(file.content);
+
+        // Cache hit: reuse issues from a prior completed run
+        const cached = await getCachedIssues(supabase, fileHash, projectId);
+        if (cached) {
+          onProgress?.(`Cache hit: ${file.name}`);
+          return triageByConfidence(cached);
+        }
+
+        onProgress?.(`Analyzing: ${file.name}`);
+        const issues = await analyzeCodeWithGemini(
+          file.name,
+          file.content,
+          projectId,
+          runId,
+          providerToken,
+          dualModelMode,
+          options
+        );
+        return triageByConfidence(issues);
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result.status === 'fulfilled' && result.value) {
+        allIssues.push(...result.value);
+      } else if (result.status === 'rejected') {
+        console.error('[analyzeFilesInParallel] batch item failed:', result.reason);
+      }
+    }
+  }
+
+  // Stage 3.5: Cross-file analysis
+  const fileSummaries = buildFileSummaries(files.map(f => ({ path: f.name, file_name: f.name, content: f.content })))
+  const crossFileIssues = await runCrossFileAnalysis(allIssues, fileSummaries, providerToken)
+  if (crossFileIssues.length > 0) {
+    allIssues.push(...crossFileIssues)
+    onProgress?.(`Cross-file analysis found ${crossFileIssues.length} additional issues`)
+  }
+
+  return allIssues;
+};
 
 interface Chunk {
   chunk_id: string;
@@ -522,7 +735,8 @@ const getGeminiEmbedding = async (
 
 const queryRagKnowledge = async (
   embedding: number[],
-  language: string
+  language: string,
+  ragThreshold?: number
 ): Promise<RagKnowledgeRow[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -530,7 +744,8 @@ const queryRagKnowledge = async (
     const { data, error } = await supabase.rpc('match_rag_knowledge', {
       query_embedding: embedding,
       match_count: 5,
-      target_language: language
+      target_language: language,
+      match_threshold: ragThreshold ?? 0.5
     });
     if (error) {
       console.warn("RAG query failed via RPC:", error);
@@ -548,7 +763,9 @@ export const analyzeCodeWithGemini = async (
   codeContent: string,
   projectId: string,
   runId: string,
-  providerToken?: string
+  providerToken?: string,
+  dualModelMode?: boolean,
+  options?: { ragThreshold?: number; outputLanguage?: 'ko' | 'en' }
 ): Promise<Issue[]> => {
   // 1. 입력 데이터 검증
   if (!codeContent || codeContent.trim().length === 0) {
@@ -721,7 +938,7 @@ export const analyzeCodeWithGemini = async (
         const embedding = await getGeminiEmbedding(queryText, '', providerToken);
         let ragReferences: RagKnowledgeRow[] = [];
         if (embedding) {
-          ragReferences = await queryRagKnowledge(embedding, parsedResult.language);
+          ragReferences = await queryRagKnowledge(embedding, parsedResult.language, options?.ragThreshold);
         }
         return {
           ...issue,
@@ -801,14 +1018,16 @@ export const analyzeCodeWithGemini = async (
       raw_issues: issuesWithRag
     });
 
-    const verifierResponseText = await callGemini(
-      verifierPrompt,
-      verifierUserPrompt,
-      '',
-      providerToken,
-      verifierSchema,
-      "application/json"
-    );
+    const verifierResponseText = dualModelMode
+      ? await callClaudeForVerification(verifierPrompt, verifierUserPrompt, verifierSchema)
+      : await callGemini(
+          verifierPrompt,
+          verifierUserPrompt,
+          '',
+          providerToken,
+          verifierSchema,
+          "application/json"
+        );
 
     let verifierResult: VerifierResult;
     try {
@@ -862,14 +1081,16 @@ export const analyzeCodeWithGemini = async (
       verified_issues: verifiedIssues
     });
 
-    const scorerResponseText = await callGemini(
-      scorerPrompt,
-      scorerUserPrompt,
-      '',
-      providerToken,
-      scorerSchema,
-      "application/json"
-    );
+    const scorerResponseText = dualModelMode
+      ? await callClaudeForScoring(scorerPrompt, scorerUserPrompt, scorerSchema)
+      : await callGemini(
+          scorerPrompt,
+          scorerUserPrompt,
+          '',
+          providerToken,
+          scorerSchema,
+          "application/json"
+        );
 
     let scorerResult: ScorerResult;
     try {
@@ -941,7 +1162,8 @@ export const analyzeCodeWithGemini = async (
       analysis_run_id: runId,
       raw_issues: issuesWithRag,
       verified_issues: verifiedIssues,
-      scored_issues: scorerResult.scored_issues
+      scored_issues: scorerResult.scored_issues,
+      output_language: options?.outputLanguage ?? 'en',
     });
 
     const reporterResponseText = await callGemini(

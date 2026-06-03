@@ -94,6 +94,8 @@ export interface AnalysisRun {
   medium_count: number;
   low_count: number;
   info_count: number;
+  trigger_type: 'manual' | 'ci' | 'api';
+  file_hash: string | null;
   created_at: string;
 }
 

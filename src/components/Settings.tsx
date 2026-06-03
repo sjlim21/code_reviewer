@@ -70,7 +70,7 @@ const DEFAULT_RULE_DEFINITIONS = [
 export const Settings: React.FC = () => {
   const { session, isDemoSession } = useAuthStore();
   const { selectedProject: project, isUsingRealDB } = useProjectStore();
-  const { eventLogs, clearEventLogs, addLog: addEventLog, aiProvider, setAiProvider } = useUiStore();
+  const { eventLogs, clearEventLogs, addLog: addEventLog, aiProvider, setAiProvider, dualModelMode, setDualModelMode, ragThreshold, setRagThreshold } = useUiStore();
 
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
@@ -279,6 +279,45 @@ export const Settings: React.FC = () => {
                 ✓ API 키는 Supabase Edge Function(<strong>claude-proxy</strong>)이 서버에서 관리합니다. 브라우저에 노출되지 않습니다.
               </p>
             )}
+          </div>
+
+          {/* Dual-model toggle */}
+          <div className="flex items-center justify-between py-3 border-b border-slate-800">
+            <div>
+              <p className="text-sm text-slate-200 font-semibold">듀얼 모델 모드</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Gemini(분석) + Claude(검증/스코어링) — 두 API 키 모두 필요
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDualModelMode(!dualModelMode)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                dualModelMode ? 'bg-indigo-500' : 'bg-slate-700'
+              }`}
+              aria-label="toggle dual model mode"
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                dualModelMode ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </button>
+          </div>
+
+          {/* RAG threshold slider */}
+          <div className="py-3 border-b border-slate-800">
+            <div className="flex justify-between mb-2">
+              <p className="text-sm text-slate-200 font-semibold">RAG 유사도 임계값</p>
+              <span className="text-xs font-mono text-indigo-400">{ragThreshold.toFixed(2)}</span>
+            </div>
+            <input
+              type="range" min="0.3" max="0.9" step="0.05"
+              value={ragThreshold}
+              onChange={(e) => setRagThreshold(parseFloat(e.target.value))}
+              className="w-full accent-indigo-500 cursor-pointer"
+            />
+            <p className="text-xs text-slate-400 mt-2">
+              높을수록 정밀 (기본값: 0.50). 낮추면 더 많은 지식 매칭, 노이즈 증가.
+            </p>
           </div>
 
           {/* 2. Authentication & Static Analysis Engine Info Card */}
