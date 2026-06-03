@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { STORAGE_KEYS } from '../supabase';
-import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database, Info } from 'lucide-react';
+import { Save, Settings2, Sliders, Shield, Bell, Check, Key, Database, Info, Copy, RefreshCw } from 'lucide-react';
 
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
@@ -93,6 +93,8 @@ export const Settings: React.FC = () => {
   const [rulesConfig, setRulesConfig] = useState<RuleConfig[]>([]);
   const [isSaved, setIsSaved] = useState(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
+  const [rotatingSecret, setRotatingSecret] = useState(false);
 
   const obfuscate = (str: string) => {
     if (!str) return '';
@@ -105,6 +107,33 @@ export const Settings: React.FC = () => {
       return decodeURIComponent(atob(str));
     } catch {
       return str;
+    }
+  };
+
+  const webhookUrl = project
+    ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/webhook-trigger`
+    : '';
+
+  const copyWebhookUrl = async () => {
+    const payload = JSON.stringify({ project_id: project?.id });
+    await navigator.clipboard.writeText(payload);
+    setWebhookCopied(true);
+    setTimeout(() => setWebhookCopied(false), 2000);
+    addEventLog('웹훅 URL 페이로드 복사 완료.', 'success');
+  };
+
+  const rotateWebhookSecret = async () => {
+    if (!project || isDemoSession) return;
+    setRotatingSecret(true);
+    try {
+      const newSecret = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      sessionStorage.setItem(`webhook_secret_${project.id}`, btoa(newSecret));
+      setRotatingSecret(false);
+      addEventLog('웹훅 시크릿이 재발급되었습니다.', 'success');
+    } catch (error) {
+      setRotatingSecret(false);
+      addEventLog(`시크릿 재발급 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`, 'error');
     }
   };
 
@@ -319,6 +348,72 @@ export const Settings: React.FC = () => {
               높을수록 정밀 (기본값: 0.50). 낮추면 더 많은 지식 매칭, 노이즈 증가.
             </p>
           </div>
+
+          {/* CI/CD Webhook Configuration */}
+          {project && (
+            <div className="rounded-xl border border-slate-700 p-4 space-y-4 bg-slate-950/40">
+              <div>
+                <p className="text-sm font-medium text-slate-200 mb-1">CI/CD 웹훅</p>
+                <p className="text-xs text-slate-400">GitHub Actions에서 분석을 자동 트리거합니다.</p>
+              </div>
+
+              {/* Webhook URL */}
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5 font-semibold">Webhook URL</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 truncate font-mono">
+                    {webhookUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={copyWebhookUrl}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors flex items-center gap-1.5 flex-shrink-0"
+                  >
+                    <Copy size={12} />
+                    {webhookCopied ? '복사됨!' : '복사'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5">
+                  Payload에 project_id 포함: <code className="text-slate-400">{'{"project_id":"' + project.id + '"}'}</code>
+                </p>
+              </div>
+
+              {/* Rotate secret */}
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5 font-semibold">Webhook Secret</p>
+                <button
+                  type="button"
+                  onClick={rotateWebhookSecret}
+                  disabled={rotatingSecret || isDemoSession}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={12} className={rotatingSecret ? 'animate-spin' : ''} />
+                  시크릿 재발급
+                </button>
+              </div>
+
+              {/* GitHub Actions snippet */}
+              <details className="cursor-pointer">
+                <summary className="text-xs text-slate-500 hover:text-slate-400 select-none font-semibold">
+                  GitHub Actions 예시 ▸
+                </summary>
+                <pre className="mt-2 text-xs bg-slate-900 border border-slate-800 rounded-lg p-3 text-slate-400 overflow-x-auto whitespace-pre-wrap font-mono">{`.github/workflows/codeeye.yml
+on: [push, pull_request]
+jobs:
+  codeeye:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger CodeEye
+        run: |
+          curl -X POST \\
+            -H "Content-Type: application/json" \\
+            -H "X-Hub-Signature-256: $HMAC_SIG" \\
+            -d '{"project_id":"${project.id}"}' \\
+            "${webhookUrl}"`}</pre>
+              </details>
+            </div>
+          )}
 
           {/* 2. Authentication & Static Analysis Engine Info Card */}
           <div className="p-4 bg-indigo-950/20 border border-indigo-500/20 rounded-xl space-y-2.5">

@@ -82,6 +82,8 @@ export const useAnalysis = ({
       } else if (supabase) {
         const newProjId = crypto.randomUUID();
         const mainLanguage = filesToAnalyze[0]?.name.split('.').pop()?.toUpperCase() || 'Multi';
+        const newSecret = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
         const newProj: Project = {
           id: newProjId,
           name: folderName,
@@ -92,6 +94,7 @@ export const useAnalysis = ({
           status: 'active',
           total_issues: 0,
           open_issues: 0,
+          webhook_secret: newSecret,
           created_at: new Date().toISOString()
         };
         const { error: insertProjError } = await supabase.from('projects').insert(newProj);
@@ -101,6 +104,8 @@ export const useAnalysis = ({
         if (onProjectCreated) onProjectCreated(newProj);
         console.log(`Created new project: ${folderName}`);
       } else {
+        const mockSecret = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
         const mockProj: Project = {
           id: `prj-${Date.now()}`,
           name: folderName,
@@ -111,6 +116,7 @@ export const useAnalysis = ({
           status: 'active',
           total_issues: 0,
           open_issues: 0,
+          webhook_secret: mockSecret,
           created_at: new Date().toISOString()
         };
         activeProjId = mockProj.id;

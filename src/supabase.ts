@@ -76,6 +76,7 @@ export interface Project {
   language: string;
   repo_url: string;
   status: 'active' | 'archived' | 'deleted';
+  webhook_secret: string | null;
   total_issues: number;
   open_issues: number;
   created_at: string;
@@ -159,6 +160,7 @@ export const mockProjects: Project[] = [
     status: 'active',
     total_issues: 15,
     open_issues: 9,
+    webhook_secret: 'whs_prj1_demo_e7b4c2f8a1d5e3f7b9a8c6d2e4f1a5b7',
     created_at: '2026-05-20T10:00:00Z'
   },
   {
@@ -171,6 +173,7 @@ export const mockProjects: Project[] = [
     status: 'active',
     total_issues: 8,
     open_issues: 4,
+    webhook_secret: 'whs_prj2_demo_f2a8d1e6c3b9f7e4a2d5f8c1b4e7a0d3',
     created_at: '2026-05-25T14:30:00Z'
   }
 ];

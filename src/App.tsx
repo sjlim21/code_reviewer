@@ -8,6 +8,8 @@ import { CodeViewer } from './components/CodeViewer';
 import { Uploader } from './components/Uploader';
 import { Settings } from './components/Settings';
 import { Login } from './components/Login';
+import History from './components/History';
+import Reports from './components/Reports';
 import { AppShell } from './components/layout/AppShell';
 import {
   mockProjects,
@@ -399,16 +401,8 @@ function AppContent() {
         {/* Tab Router Switch */}
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'upload' && <Uploader />}
-        {activeTab === 'history' && (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <p className="text-white/30">History — coming soon</p>
-          </div>
-        )}
-        {activeTab === 'reports' && (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <p className="text-white/30">Reports — coming soon</p>
-          </div>
-        )}
+        {activeTab === 'history' && <History />}
+        {activeTab === 'reports' && <Reports />}
         {activeTab === 'settings' && <Settings />}
       </AppShell>
 

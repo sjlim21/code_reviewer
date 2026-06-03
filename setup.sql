@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS public.projects (
   repo_url        TEXT,
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'deleted')),
   analysis_config JSONB NOT NULL DEFAULT '{}',
+  webhook_secret  TEXT,
   total_issues    INTEGER NOT NULL DEFAULT 0,
   open_issues     INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -432,4 +433,12 @@ LANGUAGE sql STABLE AS $$
   ORDER BY rk.embedding <=> query_embedding
   LIMIT match_count;
 $$;
+
+-- 16. generate_webhook_secret function
+CREATE OR REPLACE FUNCTION generate_webhook_secret()
+RETURNS TEXT AS $$
+BEGIN
+  RETURN encode(gen_random_bytes(32), 'hex');
+END;
+$$ LANGUAGE plpgsql;
 
