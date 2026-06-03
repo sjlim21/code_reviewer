@@ -10,7 +10,7 @@ interface ProjectState {
   removeProject: (id: string) => void
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
+export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   selectedProject: null,
   setProjects: (projects) => set({ projects }),
